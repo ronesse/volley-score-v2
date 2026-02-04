@@ -551,15 +551,7 @@ function App() {
 
   return (
     <div className="wrap">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <h2 className="pageTitle">🏐 Livescore</h2>
-        <button
-          className="themeToggle"
-          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-        >
-          {theme === "light" ? "🌙 Mørk bakgrunn" : "🌞 Lys bakgrunn"}
-        </button>
-      </div>
+
 
       {/* NB: topbar med status/kilde er fjernet som ønsket */}
 
