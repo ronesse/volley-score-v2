@@ -581,7 +581,7 @@ function App(){
 
   return (
     <div className="wrap">
-      <h2 className="pageTitle">🏐 Volley Hub</h2>
+ 
 
       <div className="nav">
         <button className={"btn " + (tab==="teams" ? "primary" : "")} onClick={() => { setTab("teams"); setSelectedTeam(null); }}>
