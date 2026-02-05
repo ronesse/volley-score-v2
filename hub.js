@@ -17,8 +17,7 @@ const LOOKBACK_DAYS = 30;
 const FILTERS = [
   { key: "abroad",  label: "Norske spillere i utlandet", empty: "Ingen treff i “Norske spillere i utlandet”." },
   { key: "mizuno",  label: "Mizuno Norge", empty: "Ingen treff i “Mizuno Norge”." },
-  { key: "all",     label: "Alle", empty: "Ingen treff." },
-];
+ ];
 
 /* ===========================
    Helpers
@@ -50,6 +49,17 @@ function formatTs(tsSeconds){
   if(!tsSeconds) return "—";
   const d = new Date(tsSeconds * 1000);
   return d.toLocaleString("nb-NO", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
+}
+
+// enkel sjekk på norsk spiller
+function isNorwegianPlayer(p){
+  const n = asStr(p.nationality).toLowerCase();
+  if (!n) return false;
+  return (
+    n.startsWith("nor") || // NOR / Norway / Norsk
+    n === "no" ||
+    n === "norge"
+  );
 }
 
 /* ===========================
@@ -165,7 +175,9 @@ function matchKey(e){
   return e.eventId ?? (e.homeName + "|" + e.awayName + "|" + e.startTs);
 }
 
-/* clickable match card – nå med fokus-stil, ikke event.html */
+/* ===========================
+   MatchCard – med fokus-stil, uten event.html
+   =========================== */
 function MatchCard({ e, statusLabel, isFocused, onClick }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
@@ -201,7 +213,6 @@ function MatchCard({ e, statusLabel, isFocused, onClick }){
 
       <div className="scoreRow">
         <div className="team">
-          {/* STØRRE LAGLOGOER I HUB */}
           <LogoBox src={teamLogoUrl(e.homeId)} label={initials(e.homeName)} />
           <span className="teamName">{e.homeName}</span>
         </div>
@@ -507,7 +518,22 @@ function App(){
     return { groups, order };
   }, [visibleTeams]);
 
-  const selectedTeamPlayers = useMemo(() => {
+  /* ===========
+     Spillere-tab: søk på spiller
+     =========== */
+  const visiblePlayers = useMemo(() => {
+    const qq = q.trim().toLowerCase();
+    if (!qq) return players;
+    return players.filter(p =>
+      p.name.toLowerCase().includes(qq) ||
+      String(p.nationality||"").toLowerCase().includes(qq)
+    );
+  }, [players, q]);
+
+  /* ===========
+     Spillere i valgt lag (uavhengig av globalt søk) – norske først
+     =========== */
+  const selectedTeamPlayersAll = useMemo(() => {
     if (!selectedTeam || !selectedTeam.id) return [];
     return players
       .filter(p => p.teamId === selectedTeam.id)
@@ -530,6 +556,9 @@ function App(){
     return teamMatches.filter(m => matchKey(m.e) === focusedMatchKey);
   }, [teamMatches, focusedMatchKey]);
 
+  /* ===========
+     Presentasjonskomponenter
+     =========== */
   function TeamCard({ t }){
     const meta = (t.sofascoreTeamId != null) ? teamEventMeta.get(t.sofascoreTeamId) : null;
 
@@ -544,12 +573,11 @@ function App(){
     return (
       <div
         className="card"
-        onClick={() => { setSelectedTeam(t); setTab("teams"); }}
+        onClick={() => { setSelectedTeam(t); setTab("teams"); setFocusedMatchKey(null); }}
         style={{ cursor:"pointer" }}
       >
         <div className="row">
           <div className="left">
-            {/* logo bruker sofascoreTeamId */}
             <LogoBox src={teamLogoUrl(t.sofascoreTeamId)} label={initials(t.name)} />
             <div className="nameBlock">
               <div className="name">{t.name}</div>
@@ -603,40 +631,84 @@ function App(){
     );
   }
 
+  // Store spillerkort for "Spillere"-fanen
+  function PlayerCardLarge({ p, onClick }){
+    const photo = playerPhotoUrl(p.id);
+    const status = useImageStatus(photo);
+    const ig = nonEmpty(p.instagram);
+    const igHandle = ig ? (ig.startsWith("@") ? ig.slice(1) : ig) : null;
+    const igUrl = igHandle ? ("https://instagram.com/" + igHandle) : null;
+
+    const line2 = [
+      p.position,
+      p.jersey ? ("#" + p.jersey) : null,
+      p.nationality,
+      p.heightCm ? (p.heightCm + " cm") : null,
+      p.birthYear ? ("Født " + p.birthYear) : null
+    ].filter(Boolean).join(" · ");
+
+    return (
+      <div className="card" style={{ cursor:"pointer" }} onClick={onClick}>
+        <div className="row">
+          <div className="left">
+            <span
+              className="logoBox"
+              aria-hidden="true"
+              style={{ width:72, height:72, borderRadius:18 }}
+            >
+              {(!photo || status !== "ok") ? initials(p.name) : <img src={photo} alt="" loading="lazy" />}
+            </span>
+            <div className="nameBlock">
+              <div className="name" style={{ fontSize:18 }}>{p.name}</div>
+              <div className="sub" style={{ whiteSpace:"normal" }}>{line2 || "—"}</div>
+            </div>
+          </div>
+          <div className="meta">
+            {p.teamId && <span className="pill">TeamID: {p.teamId}</span>}
+            {p.externalUrl && <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">Volleybox →</a>}
+            {igUrl && <a className="btn" href={igUrl} target="_blank" rel="noreferrer">Instagram →</a>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const selectedMeta = useMemo(() => {
     if (!selectedTeam || selectedTeam.sofascoreTeamId == null) return null;
     return teamEventMeta.get(selectedTeam.sofascoreTeamId) || null;
   }, [selectedTeam, teamEventMeta]);
 
+  /* ===========
+     Render
+     =========== */
   return (
     <div className="wrap">
-      {/* NAV – kun Lag og Spillere i Volley Hub */}
-      <div className="nav">
-        <button
-          className={"btn " + (tab==="teams" ? "primary" : "")}
-          onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedMatchKey(null); }}
-        >
-          Lag
-        </button>
-        <button
-          className={"btn " + (tab==="players" ? "primary" : "")}
-          onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedMatchKey(null); }}
-        >
-          Spillere
-        </button>
-
-        {selectedTeam && tab === "teams" && (
+      {/* NAV – Lag / Spillere + søk på samme linje */}
+      <div className="nav" style={{ alignItems:"center" }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", flex: "1 1 auto" }}>
           <button
-            className="btn"
-            onClick={() => { setSelectedTeam(null); setFocusedMatchKey(null); }}
+            className={"btn " + (tab==="teams" ? "primary" : "")}
+            onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedMatchKey(null); }}
           >
-            ← Tilbake
+            Lag
           </button>
-        )}
-      </div>
+          <button
+            className={"btn " + (tab==="players" ? "primary" : "")}
+            onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedMatchKey(null); }}
+          >
+            Spillere
+          </button>
 
-      {/* TOPBAR – kun søkefelt, ingen "Oppdaterer" / API-tekst */}
-      <div className="topbar">
+          {selectedTeam && tab === "teams" && (
+            <button
+              className="btn"
+              onClick={() => { setSelectedTeam(null); setFocusedMatchKey(null); }}
+            >
+              ← Tilbake
+            </button>
+          )}
+        </div>
+
         <div className="controls" style={{ marginLeft:"auto" }}>
           <input
             value={q}
@@ -724,6 +796,18 @@ function App(){
             </div>
           </div>
 
+          {/* Norske spillere først – over kampene */}
+          {selectedTeamPlayersAll.length > 0 && (
+            <div className="grid">
+              {selectedTeamPlayersAll
+                .filter(isNorwegianPlayer)
+                .map(p => <PlayerRow key={p.id} p={p} />)}
+              {selectedTeamPlayersAll
+                .filter(p => !isNorwegianPlayer(p))
+                .map(p => <PlayerRow key={p.id} p={p} />)}
+            </div>
+          )}
+
           {/* Fokus-knapp når én kamp er valgt */}
           {focusedMatchKey && (
             <div style={{ marginTop: 8, marginBottom: -4 }}>
@@ -749,17 +833,26 @@ function App(){
               );
             })}
           </div>
-
-          <div className="grid">
-            {selectedTeamPlayers.map(p => <PlayerRow key={p.id} p={p} />)}
-          </div>
         </>
       )}
 
-      {/* PLAYERS TAB */}
+      {/* PLAYERS TAB – store bilder, klikk → gå til lagets kamper */}
       {tab === "players" && (
         <div className="grid">
-          {players.map(p => <PlayerRow key={p.id} p={p} />)}
+          {visiblePlayers.map(p => (
+            <PlayerCardLarge
+              key={p.id}
+              p={p}
+              onClick={() => {
+                if (!p.teamId) return;
+                const team = teams.find(t => t.id === p.teamId);
+                if (!team) return;
+                setSelectedTeam(team);
+                setTab("teams");
+                setFocusedMatchKey(null);
+              }}
+            />
+          ))}
         </div>
       )}
     </div>
