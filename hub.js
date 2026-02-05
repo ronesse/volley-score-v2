@@ -37,8 +37,12 @@ function normalizeGroupType(v){
   const s = asStr(v).toLowerCase();
   if (!s) return null;
   if (s === "mizuno" || s.includes("mizuno")) return "mizuno";
-  if (s === "abroad" || s.includes("utland") || s.includes("utlandet") || s.includes("norske spillere i utlandet"))
-    return "abroad";
+  if (
+    s === "abroad" ||
+    s.includes("utland") ||
+    s.includes("utlandet") ||
+    s.includes("norske spillere i utlandet")
+  ) return "abroad";
   return "other";
 }
 function formatTs(tsSeconds){
@@ -168,29 +172,31 @@ function eventKey(e){
 }
 
 /* ===========================
-   Match card
+   Match card (Hub)
    =========================== */
 /**
  * På hub:
  * - I listevisning: ingen sett-bokser, bare totalscore (Sett).
- * - Når et kort er "i fokus" (isFocused=true): vis sett-bokser.
+ * - Når et kort er "i fokus" (isFocused=true): vis sett-bokser og Tilbake-knapp.
+ * - Ingen event.html – alt skjer lokalt.
  */
-function MatchCard({ e, statusLabel, isFocused, onFocus }){
+function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
   const setsArr = safeArray(e.score?.sets);
   const tourLogo = tournamentLogoUrl(e.tournamentId);
 
-  const href = e.eventId ? ("event.html?event_id=" + encodeURIComponent(String(e.eventId))) : null;
+  const handleClick = () => {
+    onToggleFocus();
+  };
 
   return (
     <div
       className={"card matchCard" + (isFocused ? " focused" : "")}
       role="button"
       tabIndex={0}
-      onClick={onFocus}
-      onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") onFocus(); }}
-      title={href ? "Klikk for fokus, eller åpne detaljer" : "Klikk for fokus"}
+      onClick={handleClick}
+      onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") handleClick(); }}
       style={{ cursor:"pointer" }}
     >
       <div className="matchHeader">
@@ -236,17 +242,17 @@ function MatchCard({ e, statusLabel, isFocused, onFocus }){
         </div>
       )}
 
-      {/* Egen knapp for detaljer, så ikke kort-klikk navigerer bort */}
-      {href && (
-        <div style={{ marginTop: 10, fontSize:12, fontWeight:700 }}>
-          <a
-            href={href}
-            style={{ color:"#6b7280", textDecoration:"none" }}
-          >
-            Åpne detaljer →
-          </a>
-        </div>
-      )}
+      {/* Bunn-knapp: viser "Detaljert →" i normal view, "Tilbake" i fokus */}
+      <div style={{ marginTop: 10, fontSize:12, fontWeight:700, display:"flex", justifyContent:"flex-end" }}>
+        <button
+          type="button"
+          className="btn"
+          style={{ padding:"4px 8px", fontSize:11 }}
+          onClick={(ev) => { ev.stopPropagation(); onToggleFocus(); }}
+        >
+          {isFocused ? "Tilbake" : "Detaljert →"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -382,12 +388,12 @@ function App(){
       const nextArr = safeArray(nextData)
         .map(normalizeEvent)
         .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && !isFinished(e.raw))
-        .sort((a,b)=>(a.startTs??0)-(b.startTs??0)); // INGEN slice → alle
+        .sort((a,b)=>(a.startTs??0)-(b.startTs??0));
 
       const prevArr = safeArray(prevData)
         .map(normalizeEvent)
         .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && isFinished(e.raw))
-        .sort((a,b)=>(b.startTs??0)-(a.startTs??0)); // INGEN slice → alle
+        .sort((a,b)=>(b.startTs??0)-(a.startTs??0));
 
       setLiveTeam(liveArr);
       setNextTeam(nextArr);
@@ -730,33 +736,42 @@ function App(){
 
           {/* Kamper – alle listet, sett-bokser kun på fokusert kamp */}
           <div className="grid">
-            {liveTeam.map(e => (
-              <MatchCard
-                key={eventKey(e)}
-                e={e}
-                statusLabel="LIVE"
-                isFocused={focusedEventKey === eventKey(e)}
-                onFocus={() => setFocusedEventKey(eventKey(e))}
-              />
-            ))}
-            {nextTeam.map(e => (
-              <MatchCard
-                key={eventKey(e)}
-                e={e}
-                statusLabel="NEXT"
-                isFocused={focusedEventKey === eventKey(e)}
-                onFocus={() => setFocusedEventKey(eventKey(e))}
-              />
-            ))}
-            {prevTeam.map(e => (
-              <MatchCard
-                key={eventKey(e)}
-                e={e}
-                statusLabel="FINISHED"
-                isFocused={focusedEventKey === eventKey(e)}
-                onFocus={() => setFocusedEventKey(eventKey(e))}
-              />
-            ))}
+            {liveTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="LIVE"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
+            {nextTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="NEXT"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
+            {prevTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="FINISHED"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
           </div>
         </>
       )}
