@@ -17,7 +17,8 @@ const LOOKBACK_DAYS = 30;
 const FILTERS = [
   { key: "abroad",  label: "Norske spillere i utlandet", empty: "Ingen treff i “Norske spillere i utlandet”." },
   { key: "mizuno",  label: "Mizuno Norge", empty: "Ingen treff i “Mizuno Norge”." },
- ];
+  { key: "all",     label: "Alle", empty: "Ingen treff." },
+];
 
 /* ===========================
    Helpers
