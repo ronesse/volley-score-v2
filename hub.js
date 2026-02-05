@@ -160,24 +160,33 @@ function compHeaderText(e){
   return t || s || "—";
 }
 
-/* clickable match card -> event.html?event_id=... */
-function MatchCard({ e, statusLabel }){
+/* Unik nøkkel for matcher (til fokusvisning) */
+function matchKey(e){
+  return e.eventId ?? (e.homeName + "|" + e.awayName + "|" + e.startTs);
+}
+
+/* clickable match card – nå med fokus-stil, ikke event.html */
+function MatchCard({ e, statusLabel, isFocused, onClick }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
   const setsArr = safeArray(e.score?.sets);
   const tourLogo = tournamentLogoUrl(e.tournamentId);
 
-  const href = e.eventId ? ("event.html?event_id=" + encodeURIComponent(String(e.eventId))) : null;
-  const onClick = () => { if (href) window.location.href = href; };
+  const cls = "card matchCard" + (isFocused ? " focused" : "");
 
   return (
     <div
-      className="card matchCard"
-      role="link"
+      className={cls}
+      role="button"
       tabIndex={0}
       onClick={onClick}
-      onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") onClick(); }}
-      title={href ? "Åpne kamp" : ""}
+      onKeyDown={(ev)=>{ 
+        if((ev.key==="Enter" || ev.key===" ") && onClick){
+          ev.preventDefault();
+          onClick();
+        }
+      }}
+      title="Klikk for detaljer"
     >
       <div className="matchHeader">
         <div className="compTitle" title={compHeaderText(e)}>
@@ -219,12 +228,6 @@ function MatchCard({ e, statusLabel }){
           );
         })}
       </div>
-
-      {href && (
-        <div style={{ marginTop: 10, color:"#6b7280", fontSize:12, fontWeight:700 }}>
-          Åpne detaljer →
-        </div>
-      )}
     </div>
   );
 }
@@ -233,15 +236,15 @@ function MatchCard({ e, statusLabel }){
    App
    =========================== */
 function App(){
-  const [tab, setTab] = useState("teams");        // teams | players
-  const [filter, setFilter] = useState("abroad"); // groupType-filter
+  const [tab, setTab] = useState("teams");        // "teams" | "players"
+  const [filter, setFilter] = useState("abroad"); // groupType-filter (all/mizuno/abroad)
   const [q, setQ] = useState("");
 
   const [teams, setTeams] = useState([]);
   const [players, setPlayers] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
 
-  // global matches (for metadata, ikke lenger egen "Kamper"-tab)
+  // global matches (for metadata + team view)
   const [live, setLive] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [finished, setFinished] = useState([]);
@@ -250,6 +253,9 @@ function App(){
   const [liveTeam, setLiveTeam] = useState([]);
   const [nextTeam, setNextTeam] = useState([]);
   const [prevTeam, setPrevTeam] = useState([]);
+
+  // fokusert kamp inne på valgt lag
+  const [focusedMatchKey, setFocusedMatchKey] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -402,6 +408,8 @@ function App(){
 
   useEffect(() => {
     if (!selectedTeam) return;
+    // reset fokus når du bytter lag
+    setFocusedMatchKey(null);
     loadTeamMatches(selectedTeam);
   }, [selectedTeam]);
 
@@ -506,6 +514,22 @@ function App(){
       .sort((a,b)=>a.name.localeCompare(b.name,"nb"));
   }, [players, selectedTeam]);
 
+  /* ===========
+     Matcher pr lag + fokusert visning
+     =========== */
+  const teamMatches = useMemo(() => {
+    const res = [];
+    liveTeam.forEach(e => res.push({ e, statusLabel: "LIVE" }));
+    nextTeam.forEach(e => res.push({ e, statusLabel: "NEXT" }));
+    prevTeam.forEach(e => res.push({ e, statusLabel: "FINISHED" }));
+    return res;
+  }, [liveTeam, nextTeam, prevTeam]);
+
+  const visibleTeamMatches = useMemo(() => {
+    if (!focusedMatchKey) return teamMatches;
+    return teamMatches.filter(m => matchKey(m.e) === focusedMatchKey);
+  }, [teamMatches, focusedMatchKey]);
+
   function TeamCard({ t }){
     const meta = (t.sofascoreTeamId != null) ? teamEventMeta.get(t.sofascoreTeamId) : null;
 
@@ -518,7 +542,11 @@ function App(){
     ].filter(Boolean).join(" · ");
 
     return (
-      <div className="card" onClick={() => { setSelectedTeam(t); setTab("teams"); }} style={{ cursor:"pointer" }}>
+      <div
+        className="card"
+        onClick={() => { setSelectedTeam(t); setTab("teams"); }}
+        style={{ cursor:"pointer" }}
+      >
         <div className="row">
           <div className="left">
             {/* logo bruker sofascoreTeamId */}
@@ -575,8 +603,6 @@ function App(){
     );
   }
 
-  const statusLabel = "Kamp";
-
   const selectedMeta = useMemo(() => {
     if (!selectedTeam || selectedTeam.sofascoreTeamId == null) return null;
     return teamEventMeta.get(selectedTeam.sofascoreTeamId) || null;
@@ -588,19 +614,22 @@ function App(){
       <div className="nav">
         <button
           className={"btn " + (tab==="teams" ? "primary" : "")}
-          onClick={() => { setTab("teams"); setSelectedTeam(null); }}
+          onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedMatchKey(null); }}
         >
           Lag
         </button>
         <button
           className={"btn " + (tab==="players" ? "primary" : "")}
-          onClick={() => { setTab("players"); setSelectedTeam(null); }}
+          onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedMatchKey(null); }}
         >
           Spillere
         </button>
 
-        {selectedTeam && (
-          <button className="btn" onClick={() => setSelectedTeam(null)}>
+        {selectedTeam && tab === "teams" && (
+          <button
+            className="btn"
+            onClick={() => { setSelectedTeam(null); setFocusedMatchKey(null); }}
+          >
             ← Tilbake
           </button>
         )}
@@ -609,7 +638,11 @@ function App(){
       {/* TOPBAR – kun søkefelt, ingen "Oppdaterer" / API-tekst */}
       <div className="topbar">
         <div className="controls" style={{ marginLeft:"auto" }}>
-          <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Søk lag eller liga…" />
+          <input
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder={tab === "teams" ? "Søk lag eller liga…" : "Søk spiller…"}
+          />
         </div>
       </div>
 
@@ -691,16 +724,30 @@ function App(){
             </div>
           </div>
 
+          {/* Fokus-knapp når én kamp er valgt */}
+          {focusedMatchKey && (
+            <div style={{ marginTop: 8, marginBottom: -4 }}>
+              <button className="btn" onClick={() => setFocusedMatchKey(null)}>
+                ← Tilbake til alle kamper
+              </button>
+            </div>
+          )}
+
           <div className="grid">
-            {liveTeam.map(e => (
-              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="LIVE" />
-            ))}
-            {nextTeam.map(e => (
-              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="NEXT" />
-            ))}
-            {prevTeam.map(e => (
-              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="FINISHED" />
-            ))}
+            {visibleTeamMatches.map(m => {
+              const key = matchKey(m.e);
+              return (
+                <MatchCard
+                  key={key}
+                  e={m.e}
+                  statusLabel={m.statusLabel}
+                  isFocused={focusedMatchKey === key}
+                  onClick={() => {
+                    setFocusedMatchKey(prev => prev === key ? null : key);
+                  }}
+                />
+              );
+            })}
           </div>
 
           <div className="grid">
@@ -709,7 +756,7 @@ function App(){
         </>
       )}
 
-      {/* PLAYERS TAB – uendret liste (kan evt. forbedres senere) */}
+      {/* PLAYERS TAB */}
       {tab === "players" && (
         <div className="grid">
           {players.map(p => <PlayerRow key={p.id} p={p} />)}
