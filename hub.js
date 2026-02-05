@@ -179,12 +179,19 @@ function eventKey(e){
  * - I listevisning: ingen sett-bokser, bare totalscore (Sett).
  * - Når et kort er "i fokus" (isFocused=true): vis sett-bokser og Tilbake-knapp.
  * - Ingen event.html – alt skjer lokalt.
+ * - Fremtidige kamper uten score viser ".. - .." i stedet for "0 - 0".
  */
 function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
   const setsArr = safeArray(e.score?.sets);
   const tourLogo = tournamentLogoUrl(e.tournamentId);
+
+  // Hvis kampen åpenbart ikke har startet: vis ".. - .."
+  const hasAnySetPoints = setsArr.length > 0;
+  const hasScore = (hs !== 0 || as !== 0 || hasAnySetPoints);
+  const displayHomeSets = hasScore ? hs : "..";
+  const displayAwaySets = hasScore ? as : "..";
 
   const handleClick = () => {
     onToggleFocus();
@@ -216,8 +223,8 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
           <span className="teamName">{e.homeName}</span>
         </div>
 
-      <div className="bigScore">
-          <div className="sets">{hs} - {as}</div>
+        <div className="bigScore">
+          <div className="sets">{displayHomeSets} - {displayAwaySets}</div>
           <div className="points">Sett</div>
         </div>
 
