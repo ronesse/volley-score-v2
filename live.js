@@ -254,7 +254,6 @@ function EventCard(props) {
             <LogoBox src={tourLogo} />
             <span>{compHeaderText(ev)}</span>
           </div>
-          {/* Ingen ekstra group-type tekst her – renere kort */}
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -350,17 +349,11 @@ function App() {
   const [serve, setServe] = useState({});
   const [playLabel, setPlayLabel] = useState({});
   const [focusedKey, setFocusedKey] = useState(null);
-  const [theme, setTheme] = useState("light");
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
   const serveRef = useRef({});
   const wakeLockRef = useRef(null);
-
-  // Sync tema til body data-attribute
-  useEffect(() => {
-    document.body.setAttribute("data-theme", theme);
-  }, [theme]);
 
   const fetchJson = useCallback(async (path, signal) => {
     const res = await fetch(API_BASE + path, {
@@ -604,16 +597,7 @@ function App() {
 
   return (
     <div className="wrap">
-      {/* Kun tema-knapp, ingen overskrift / badges / kilde-tekst */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-        <button
-          className="themeToggle"
-          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-        >
-          {theme === "light" ? "🌙 Mørk bakgrunn" : "🌞 Lys bakgrunn"}
-        </button>
-      </div>
-
+      {/* Kun filterlinje og kamper – helt ren topp */}
       <div className="focusBar">
         <div className="badges" style={{ marginBottom: 4 }}>
           {FILTERS.map(f => {
