@@ -85,7 +85,6 @@ function MiniLogo({ src }){
 
 /* ===========================
    Image URL rules
-   NOTE: team logos uses sofascore team id (same as events homeId/awayId)
    =========================== */
 function teamLogoUrl(sofaTeamId){
   const id = nonEmpty(sofaTeamId);
@@ -169,11 +168,13 @@ function MatchCard({ e, statusLabel }){
   const tourLogo = tournamentLogoUrl(e.tournamentId);
 
   const href = e.eventId ? ("event.html?event_id=" + encodeURIComponent(String(e.eventId))) : null;
-
   const onClick = () => { if (href) window.location.href = href; };
 
   return (
-    <div className="card matchCard" role="link" tabIndex={0}
+    <div
+      className="card matchCard"
+      role="link"
+      tabIndex={0}
       onClick={onClick}
       onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") onClick(); }}
       title={href ? "Åpne kamp" : ""}
@@ -191,7 +192,8 @@ function MatchCard({ e, statusLabel }){
 
       <div className="scoreRow">
         <div className="team">
-          <MiniLogo src={teamLogoUrl(e.homeId)} />
+          {/* STØRRE LAGLOGOER I HUB */}
+          <LogoBox src={teamLogoUrl(e.homeId)} label={initials(e.homeName)} />
           <span className="teamName">{e.homeName}</span>
         </div>
 
@@ -201,7 +203,7 @@ function MatchCard({ e, statusLabel }){
         </div>
 
         <div className="team right">
-          <MiniLogo src={teamLogoUrl(e.awayId)} />
+          <LogoBox src={teamLogoUrl(e.awayId)} label={initials(e.awayName)} />
           <span className="teamName">{e.awayName}</span>
         </div>
       </div>
@@ -231,16 +233,15 @@ function MatchCard({ e, statusLabel }){
    App
    =========================== */
 function App(){
-  const [tab, setTab] = useState("teams");
-  const [matchesView, setMatchesView] = useState("live"); // live | next | finished
-  const [filter, setFilter] = useState("abroad");
+  const [tab, setTab] = useState("teams");        // teams | players
+  const [filter, setFilter] = useState("abroad"); // groupType-filter
   const [q, setQ] = useState("");
 
   const [teams, setTeams] = useState([]);
   const [players, setPlayers] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
 
-  // global matches
+  // global matches (for metadata, ikke lenger egen "Kamper"-tab)
   const [live, setLive] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [finished, setFinished] = useState([]);
@@ -348,7 +349,11 @@ function App(){
         fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
       ]);
 
-      setLiveTeam(safeArray(liveData).map(normalizeEvent).filter(e => e.homeId===teamSofa || e.awayId===teamSofa));
+      setLiveTeam(
+        safeArray(liveData)
+          .map(normalizeEvent)
+          .filter(e => e.homeId===teamSofa || e.awayId===teamSofa)
+      );
       setNextTeam(
         safeArray(nextData)
           .map(normalizeEvent)
@@ -401,8 +406,7 @@ function App(){
   }, [selectedTeam]);
 
   /* ===========
-     Build "best" tournament/season per team (based on events)
-     Uses sofascore team id (event.homeId / event.awayId)
+     Build "best" tournament/season per team (basert på events)
      =========== */
   const teamEventMeta = useMemo(() => {
     const allEvents = [...live, ...upcoming, ...finished];
@@ -446,32 +450,20 @@ function App(){
     return out;
   }, [live, upcoming, finished]);
 
-  const matchCounts = useMemo(() => {
-    const src = (matchesView === "live") ? live : (matchesView === "next") ? upcoming : finished;
+  /* ===========
+     Team counts for filter-knapper (etter groupType)
+     =========== */
+  const teamCounts = useMemo(() => {
     return {
-      all: src.length,
-      mizuno: src.filter(e => e.groupType === "mizuno").length,
-      abroad: src.filter(e => e.groupType === "abroad").length,
+      all: teams.length,
+      mizuno: teams.filter(t => t.groupType === "mizuno").length,
+      abroad: teams.filter(t => t.groupType === "abroad").length,
     };
-  }, [live, upcoming, finished, matchesView]);
+  }, [teams]);
 
-  const visibleMatches = useMemo(() => {
-    const src = (matchesView === "live") ? live : (matchesView === "next") ? upcoming : finished;
-    let base = src;
-    if (filter !== "all") base = base.filter(e => e.groupType === filter);
-
-    const qq = q.trim().toLowerCase();
-    if (qq){
-      base = base.filter(e =>
-        String(e.homeName||"").toLowerCase().includes(qq) ||
-        String(e.awayName||"").toLowerCase().includes(qq) ||
-        String(e.tournamentName||"").toLowerCase().includes(qq) ||
-        String(e.seasonName||"").toLowerCase().includes(qq)
-      );
-    }
-    return base;
-  }, [live, upcoming, finished, matchesView, filter, q]);
-
+  /* ===========
+     Filterte lag + søk
+     =========== */
   const visibleTeams = useMemo(() => {
     let base = teams;
     if (filter !== "all") base = base.filter(t => t.groupType === filter);
@@ -485,22 +477,33 @@ function App(){
         String(t.widgetName||"").toLowerCase().includes(qq)
       );
     }
-    return [...base].sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+    return base;
   }, [teams, filter, q]);
 
-  const visiblePlayers = useMemo(() => {
-    const qq = q.trim().toLowerCase();
-    if (!qq) return players;
-    return players.filter(p =>
-      p.name.toLowerCase().includes(qq) ||
-      String(p.nationality || "").toLowerCase().includes(qq) ||
-      String(p.position || "").toLowerCase().includes(qq)
-    );
-  }, [players, q]);
+  /* ===========
+     Grupper lag etter liga (innenfor valgt filter + søk)
+     =========== */
+  const groupedTeams = useMemo(() => {
+    const groups = {};
+    for (const t of visibleTeams) {
+      const league = t.league || "Andre / ukjent liga";
+      if (!groups[league]) groups[league] = [];
+      groups[league].push(t);
+    }
+    // sorter lag alfabetisk innen hver liga
+    Object.values(groups).forEach(arr => {
+      arr.sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+    });
+    // sorter liganavn alfabetisk
+    const order = Object.keys(groups).sort((a,b)=>a.localeCompare(b,"nb"));
+    return { groups, order };
+  }, [visibleTeams]);
 
   const selectedTeamPlayers = useMemo(() => {
     if (!selectedTeam || !selectedTeam.id) return [];
-    return players.filter(p => p.teamId === selectedTeam.id).sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+    return players
+      .filter(p => p.teamId === selectedTeam.id)
+      .sort((a,b)=>a.name.localeCompare(b.name,"nb"));
   }, [players, selectedTeam]);
 
   function TeamCard({ t }){
@@ -518,7 +521,7 @@ function App(){
       <div className="card" onClick={() => { setSelectedTeam(t); setTab("teams"); }} style={{ cursor:"pointer" }}>
         <div className="row">
           <div className="left">
-            {/* IMPORTANT: logo uses sofascoreTeamId */}
+            {/* logo bruker sofascoreTeamId */}
             <LogoBox src={teamLogoUrl(t.sofascoreTeamId)} label={initials(t.name)} />
             <div className="nameBlock">
               <div className="name">{t.name}</div>
@@ -572,7 +575,7 @@ function App(){
     );
   }
 
-  const statusLabel = matchesView === "live" ? "LIVE" : matchesView === "next" ? "NEXT" : "FINISHED";
+  const statusLabel = "Kamp";
 
   const selectedMeta = useMemo(() => {
     if (!selectedTeam || selectedTeam.sofascoreTeamId == null) return null;
@@ -581,17 +584,19 @@ function App(){
 
   return (
     <div className="wrap">
- 
-
+      {/* NAV – kun Lag og Spillere i Volley Hub */}
       <div className="nav">
-        <button className={"btn " + (tab==="teams" ? "primary" : "")} onClick={() => { setTab("teams"); setSelectedTeam(null); }}>
+        <button
+          className={"btn " + (tab==="teams" ? "primary" : "")}
+          onClick={() => { setTab("teams"); setSelectedTeam(null); }}
+        >
           Lag
         </button>
-        <button className={"btn " + (tab==="players" ? "primary" : "")} onClick={() => { setTab("players"); setSelectedTeam(null); }}>
+        <button
+          className={"btn " + (tab==="players" ? "primary" : "")}
+          onClick={() => { setTab("players"); setSelectedTeam(null); }}
+        >
           Spillere
-        </button>
-        <button className={"btn " + (tab==="matches" ? "primary" : "")} onClick={() => { setTab("matches"); setSelectedTeam(null); }}>
-          Kamper
         </button>
 
         {selectedTeam && (
@@ -601,35 +606,32 @@ function App(){
         )}
       </div>
 
-      {tab === "matches" && !selectedTeam && (
-        <div className="subnav">
-          <button className={"btn " + (matchesView==="live" ? "primary" : "")} onClick={()=>setMatchesView("live")}>Live</button>
-          <button className={"btn " + (matchesView==="next" ? "primary" : "")} onClick={()=>setMatchesView("next")}>Neste</button>
-          <button className={"btn " + (matchesView==="finished" ? "primary" : "")} onClick={()=>setMatchesView("finished")}>Ferdige</button>
-        </div>
-      )}
-
+      {/* TOPBAR – kun søkefelt, ingen "Oppdaterer" / API-tekst */}
       <div className="topbar">
-        <div className="badges">
-          <span className="badge"><span className="dot"></span>Oppdaterer hvert {Math.round(POLL_MS/1000)}s</span>
-          <span className="badge" style={{ color:"#6b7280" }}>Events: {API_BASE_EVENTS.replace("https://","")}</span>
-        </div>
-        <div className="controls">
-          <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Søk…" />
+        <div className="controls" style={{ marginLeft:"auto" }}>
+          <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Søk lag eller liga…" />
         </div>
       </div>
 
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
-      {/* Filters shown on teams + matches tabs */}
-      {(tab === "teams" || tab === "matches") && !selectedTeam && (
+      {/* FILTER – kun på Lag, ingen Kamper-tab */}
+      {tab === "teams" && !selectedTeam && (
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {FILTERS.map(f => {
             const active = filter === f.key;
-            const n = (f.key === "all") ? matchCounts.all : (f.key === "mizuno") ? matchCounts.mizuno : matchCounts.abroad;
+            const n = (f.key === "all")
+              ? teamCounts.all
+              : (f.key === "mizuno")
+              ? teamCounts.mizuno
+              : teamCounts.abroad;
             return (
-              <button key={f.key} className={"btn " + (active ? "primary" : "")} onClick={() => setFilter(f.key)}>
+              <button
+                key={f.key}
+                className={"btn " + (active ? "primary" : "")}
+                onClick={() => setFilter(f.key)}
+              >
                 {f.label} ({n})
               </button>
             );
@@ -637,11 +639,27 @@ function App(){
         </div>
       )}
 
-      {/* TEAMS TAB */}
+      {/* TEAMS TAB – gruppert etter liga */}
       {tab === "teams" && !selectedTeam && (
-        <div className="grid">
-          {visibleTeams.map(t => <TeamCard key={t.id} t={t} />)}
-        </div>
+        <>
+          {groupedTeams.order.map(leagueName => (
+            <div key={leagueName} style={{ marginTop: 14 }}>
+              <h3 className="leagueHeader">{leagueName}</h3>
+              <div className="grid">
+                {groupedTeams.groups[leagueName].map(t => (
+                  <TeamCard key={t.id} t={t} />
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {!groupedTeams.order.length && !loading && (
+            <div className="card" style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 900 }}>Ingen lag</div>
+              <div style={{ color:"#6b7280", marginTop: 6 }}>Ingen lag matcher filteret.</div>
+            </div>
+          )}
+        </>
       )}
 
       {/* TEAM VIEW */}
@@ -674,9 +692,15 @@ function App(){
           </div>
 
           <div className="grid">
-            {liveTeam.map(e => <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="LIVE" />)}
-            {nextTeam.map(e => <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="NEXT" />)}
-            {prevTeam.map(e => <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="FINISHED" />)}
+            {liveTeam.map(e => (
+              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="LIVE" />
+            ))}
+            {nextTeam.map(e => (
+              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="NEXT" />
+            ))}
+            {prevTeam.map(e => (
+              <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel="FINISHED" />
+            ))}
           </div>
 
           <div className="grid">
@@ -685,29 +709,11 @@ function App(){
         </>
       )}
 
-      {/* PLAYERS TAB */}
+      {/* PLAYERS TAB – uendret liste (kan evt. forbedres senere) */}
       {tab === "players" && (
         <div className="grid">
-          {visiblePlayers.map(p => <PlayerRow key={p.id} p={p} />)}
+          {players.map(p => <PlayerRow key={p.id} p={p} />)}
         </div>
-      )}
-
-      {/* MATCHES TAB */}
-      {tab === "matches" && !selectedTeam && (
-        <>
-          {visibleMatches.length ? (
-            <div className="grid">
-              {visibleMatches.map(e => (
-                <MatchCard key={e.eventId ?? (e.homeName+"|"+e.awayName+"|"+e.startTs)} e={e} statusLabel={statusLabel} />
-              ))}
-            </div>
-          ) : (
-            <div className="card" style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 900 }}>Ingen treff</div>
-              <div style={{ color:"#6b7280", marginTop: 6 }}>{FILTERS.find(x => x.key === filter)?.empty}</div>
-            </div>
-          )}
-        </>
       )}
     </div>
   );
