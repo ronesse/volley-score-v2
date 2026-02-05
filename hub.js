@@ -216,7 +216,7 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
           <span className="teamName">{e.homeName}</span>
         </div>
 
-        <div className="bigScore">
+      <div className="bigScore">
           <div className="sets">{hs} - {as}</div>
           <div className="points">Sett</div>
         </div>
@@ -242,7 +242,7 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
         </div>
       )}
 
-      {/* Bunn-knapp: viser "Detaljert →" i normal view, "Tilbake" i fokus */}
+      {/* Bunn-knapp: "Detaljert →" / "Tilbake" */}
       <div style={{ marginTop: 10, fontSize:12, fontWeight:700, display:"flex", justifyContent:"flex-end" }}>
         <button
           type="button"
@@ -281,6 +281,9 @@ function App(){
 
   // fokus på enkeltkamp (hub)
   const [focusedEventKey, setFocusedEventKey] = useState(null);
+
+  // HUB-spesifikke filtre for lag (abroad / mizuno / all)
+  const [teamFilter, setTeamFilter] = useState("all");
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -488,9 +491,14 @@ function App(){
   /* ===========
      Derived lists
      =========== */
-  // Lag: sortert på liga først, så navn
-  const visibleTeams = useMemo(() => {
+  // Lag: filtrer på groupType (abroad / mizuno / all) + søk
+  const filteredTeams = useMemo(() => {
     let base = teams;
+    if (teamFilter === "abroad") {
+      base = base.filter(t => t.groupType === "abroad");
+    } else if (teamFilter === "mizuno") {
+      base = base.filter(t => t.groupType === "mizuno");
+    }
     const qq = qTeams.trim().toLowerCase();
     if (qq){
       base = base.filter(t =>
@@ -500,13 +508,25 @@ function App(){
         String(t.widgetName||"").toLowerCase().includes(qq)
       );
     }
-    return [...base].sort((a,b)=>{
-      const la = (a.league || "").toLowerCase();
-      const lb = (b.league || "").toLowerCase();
-      if (la !== lb) return la.localeCompare(lb,"nb");
-      return a.name.localeCompare(b.name,"nb");
-    });
-  }, [teams, qTeams]);
+    return base;
+  }, [teams, teamFilter, qTeams]);
+
+  // Gruppér lag på liga
+  const leagueGroups = useMemo(() => {
+    const groups = new Map(); // leagueLabel -> [teams]
+    for (const t of filteredTeams) {
+      const key = t.league || "Uten liga";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    }
+    const result = [];
+    for (const [league, arr] of groups.entries()) {
+      arr.sort((a,b)=>a.name.localeCompare(b.name, "nb"));
+      result.push({ league, teams: arr });
+    }
+    result.sort((a,b)=>a.league.localeCompare(b.league, "nb"));
+    return result;
+  }, [filteredTeams]);
 
   // Spillere – søk + alfabetisk
   const visiblePlayers = useMemo(() => {
@@ -681,10 +701,67 @@ function App(){
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
-      {/* TEAMS LIST */}
+      {/* HUB-filtere for lag: Norske spillere ute / Norge Mizuno / Alle */}
+      {tab === "teams" && !selectedTeam && (
+        <div className="focusBar" style={{ marginTop: 4, marginBottom: 4 }}>
+          <div className="badges" style={{ marginBottom: 4 }}>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="abroad" ? "#111827" : "#fafafa",
+                color:      teamFilter==="abroad" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="abroad" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("abroad")}
+            >
+              Norske spillere ute
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="mizuno" ? "#111827" : "#fafafa",
+                color:      teamFilter==="mizuno" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="mizuno" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("mizuno")}
+            >
+              Norge Mizuno
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="all" ? "#111827" : "#fafafa",
+                color:      teamFilter==="all" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="all" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("all")}
+            >
+              Alle
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TEAMS LIST – gruppert på liga */}
       {tab === "teams" && !selectedTeam && (
         <div className="grid">
-          {visibleTeams.map(t => <TeamCard key={t.id} t={t} />)}
+          {leagueGroups.map(group => (
+            <div key={group.league}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#6b7280",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  margin: "8px 4px 4px",
+                }}
+              >
+                {group.league}
+              </div>
+              {group.teams.map(t => <TeamCard key={t.id} t={t} />)}
+            </div>
+          ))}
         </div>
       )}
 
