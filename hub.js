@@ -268,7 +268,8 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
    App
    =========================== */
 function App(){
-  const [tab, setTab] = useState("teams"); // "teams" | "players"
+  // Spillere først, deretter lag
+  const [tab, setTab] = useState("players"); // "players" | "teams"
   const [qTeams, setQTeams] = useState("");
   const [qPlayers, setQPlayers] = useState("");
 
@@ -626,31 +627,99 @@ function App(){
     };
 
     return (
-      <div className="card" style={{ cursor: playerTeam ? "pointer" : "default" }} onClick={handleClick}>
-        <div className="row">
-          <div className="left">
-            <span className="logoBox" aria-hidden="true" style={{ width:72, height:72, borderRadius:16 }}>
+      <div
+        className="card playerCard"
+        style={{ cursor: playerTeam ? "pointer" : "default" }}
+        onClick={handleClick}
+      >
+        <div
+          className="playerCardInner"
+          style={{ display:"flex", flexWrap:"wrap", gap:12 }}
+        >
+          {/* Bildekolonne – tar omtrent halvparten på større skjermer */}
+          <div
+            className="playerImageCol"
+            style={{
+              flex:"1 1 280px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              alignItems:"stretch"
+            }}
+          >
+            <span
+              className="logoBox playerPhotoBox"
+              aria-hidden="true"
+              style={{
+                width:"100%",
+                height:"100%",
+                maxHeight:240,
+                borderRadius:16,
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                fontWeight:900,
+                fontSize:18,
+              }}
+            >
               {(!photo || status !== "ok")
-                ? <span style={{ fontWeight:900, fontSize:18 }}>{initials(p.name)}</span>
-                : <img src={photo} alt="" loading="lazy" />}
+                ? <span>{initials(p.name)}</span>
+                : <img src={photo} alt="" loading="lazy" style={{ width:"100%", height:"100%", objectFit:"cover" }} />}
             </span>
+          </div>
+
+          {/* Infokolonne – resten av kortet */}
+          <div
+            className="playerInfoCol"
+            style={{
+              flex:"1 1 260px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              flexDirection:"column",
+              gap:8,
+              minHeight: "100%"
+            }}
+          >
             <div className="nameBlock">
               <div className="name">{p.name}</div>
               <div className="sub">{line2 || "—"}</div>
+
               {playerTeam && (
-                <div className="sub">
-                  Lag: <strong>{playerTeam.name}</strong> {playerTeam.league ? ("· " + playerTeam.league) : ""}
+                <div
+                  className="sub playerTeamLine"
+                  style={{
+                    display:"flex",
+                    alignItems:"center",
+                    gap:6,
+                    flexWrap:"wrap",
+                    marginTop:4
+                  }}
+                >
+                  <MiniLogo src={teamLogoUrl(playerTeam.sofascoreTeamId)} />
+                  <span>
+                    {playerTeam.name}
+                    {playerTeam.league ? (" · " + playerTeam.league) : ""}
+                  </span>
                 </div>
               )}
             </div>
-          </div>
-          <div className="meta">
-            {p.externalUrl && (
-              <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">Volleybox →</a>
-            )}
-            {igUrl && (
-              <a className="btn" href={igUrl} target="_blank" rel="noreferrer">Instagram →</a>
-            )}
+
+            <div
+              className="meta"
+              style={{ marginTop:"auto", justifyContent:"flex-start" }}
+            >
+              {p.externalUrl && (
+                <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">
+                  Volleybox →
+                </a>
+              )}
+              {igUrl && (
+                <a className="btn" href={igUrl} target="_blank" rel="noreferrer">
+                  Instagram →
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -662,20 +731,20 @@ function App(){
      =========================== */
   return (
     <div className="wrap">
-      {/* Topp: tabs + søk */}
+      {/* Topp: tabs + søk – Spillere først */}
       <div className="nav" style={{ justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-          <button
-            className={"btn " + (tab==="teams" ? "primary" : "")}
-            onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedEventKey(null); }}
-          >
-            Lag
-          </button>
           <button
             className={"btn " + (tab==="players" ? "primary" : "")}
             onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedEventKey(null); }}
           >
             Spillere
+          </button>
+          <button
+            className={"btn " + (tab==="teams" ? "primary" : "")}
+            onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedEventKey(null); }}
+          >
+            Lag
           </button>
 
           {selectedTeam && tab==="teams" && (
@@ -860,7 +929,7 @@ function App(){
         </>
       )}
 
-      {/* PLAYERS TAB */}
+      {/* PLAYERS TAB – spillere først */}
       {tab === "players" && (
         <div className="grid">
           {visiblePlayers.map(p => <PlayerCardLarge key={p.id} p={p} />)}
