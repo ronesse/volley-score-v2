@@ -36,18 +36,33 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
+/**
+ * Normaliserer group_type til:
+ *  - "mizuno"  (Mizuno, Mizuno Norge, osv.)
+ *  - "abroad"  (Norske spillere i utlandet, utland, abroad, ...)
+ *  - "other"   (alt annet)
+ */
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
   if (!s) return null;
-  if (s === "mizuno") return "mizuno";
-  if (s === "abroad") return "abroad";
-  return s;
-}
 
-// les group_type både snake_case og camelCase (samme som i hub.js)
-function getGroupType(ev) {
-  return normalizeGroupType(ev.group_type ?? ev.groupType ?? null);
+  // Fanger opp "Mizuno", "Mizuno Norge", osv.
+  if (s === "mizuno" || s.includes("mizuno")) {
+    return "mizuno";
+  }
+
+  // Fanger opp "Norske spillere i utlandet", "utland", "abroad", osv.
+  if (
+    s === "abroad" ||
+    s.includes("utland") ||
+    s.includes("utlandet") ||
+    s.includes("norske spillere i utlandet")
+  ) {
+    return "abroad";
+  }
+
+  return "other";
 }
 
 // finn pågående sett + poeng
@@ -69,10 +84,16 @@ function currentPoints(ev) {
   };
 }
 
+/**
+ * Filtre – i ønsket rekkefølge:
+ *  1. Norske spillere ute (abroad)
+ *  2. Norge Mizuno (mizuno)
+ *  3. Alle
+ */
 const FILTERS = [
-  { key: "all", label: "Alle", empty: "Det er ingen pågående kamper for øyeblikket." },
-  { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper i Norsk Mizunoliga." },
-  { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i aksjon for øyeblikket." },
+  { key: "abroad", label: "Norske spillere ute", empty: "Det er ingen norske spillere i aksjon for øyeblikket." },
+  { key: "mizuno", label: "Norge Mizuno",        empty: "Det er ingen pågående kamper i Norsk Mizunoliga." },
+  { key: "all",    label: "Alle",                empty: "Det er ingen pågående kamper for øyeblikket." },
 ];
 
 const SetBox = memo(function SetBox(props) {
@@ -227,28 +248,17 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onClick();
-    }
-  };
-
   return (
-    <div
-      className={cls}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-    >
+    <div className={cls} onClick={onClick} role="button">
       <div className="cardHeader">
         <div>
           <div className="compTitle">
             <LogoBox src={tourLogo} />
             <span>{compHeaderText(ev)}</span>
           </div>
-          <div className="sub">{ev.group_type ? String(ev.group_type) : ""}</div>
+          <div className="sub">
+            {ev.group_type ? String(ev.group_type) : ""}
+          </div>
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -265,6 +275,7 @@ function EventCard(props) {
 
         <div className="bigScore">
           <div className="pointsMain">
+            {/* Hjemme: ikon overlay til venstre for poeng */}
             <span
               key={"ph-" + (flashInfo.home || 0)}
               className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
@@ -277,6 +288,7 @@ function EventCard(props) {
 
             <span className="pointSep">-</span>
 
+            {/* Borte: ikon overlay til høyre for poeng */}
             <span
               key={"pa-" + (flashInfo.away || 0)}
               className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
@@ -487,21 +499,63 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
+  /**
+   * Telling for filtrene:
+   *  - abroad: norske spillere ute
+   *  - mizuno: Norge Mizuno
+   *  - all: alle live
+   */
   const counts = useMemo(() => {
     let miz = 0, abr = 0;
+
     for (let i = 0; i < liveEvents.length; i++) {
-      const gt = getGroupType(liveEvents[i]);
+      const gt = normalizeGroupType(liveEvents[i].group_type);
       if (gt === "mizuno") miz++;
       else if (gt === "abroad") abr++;
     }
-    return { all: liveEvents.length, mizuno: miz, abroad: abr };
+
+    return {
+      all: liveEvents.length,
+      mizuno: miz,
+      abroad: abr,
+    };
   }, [liveEvents]);
 
+  /**
+   * Filtrering:
+   *  - "abroad": kun abroad
+   *  - "mizuno": kun mizuno
+   *  - "all": alle, men rekkefølge:
+   *      1) abroad
+   *      2) mizuno
+   *      3) other
+   *    (alle sortert på start_ts innenfor hver gruppe)
+   */
   const filtered = useMemo(() => {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
-    if (filter === "all") return arr;
-    return arr.filter(ev => getGroupType(ev) === filter);
+
+    if (filter === "abroad") {
+      return arr.filter(ev => normalizeGroupType(ev.group_type) === "abroad");
+    }
+
+    if (filter === "mizuno") {
+      return arr.filter(ev => normalizeGroupType(ev.group_type) === "mizuno");
+    }
+
+    // "all": alle, men abroad først, så mizuno, så resten
+    const abroadArr = [];
+    const mizunoArr = [];
+    const otherArr = [];
+
+    for (const ev of arr) {
+      const gt = normalizeGroupType(ev.group_type);
+      if (gt === "abroad") abroadArr.push(ev);
+      else if (gt === "mizuno") mizunoArr.push(ev);
+      else otherArr.push(ev);
+    }
+
+    return [...abroadArr, ...mizunoArr, ...otherArr];
   }, [liveEvents, filter]);
 
   const visible = useMemo(() => {
@@ -551,15 +605,40 @@ function App() {
 
   return (
     <div className="wrap">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h1>🏐 Livescore</h1>
+        <button
+          className="themeToggle"
+          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+        >
+          {theme === "light" ? "🌙 Mørk bakgrunn" : "🌞 Lys bakgrunn"}
+        </button>
+      </div>
 
-
-      {/* NB: topbar med status/kilde er fjernet som ønsket */}
+      <div className="topbar">
+        <div className="badges">
+          <span className="badge">
+            <span className="dot" style={{ background: "#22c55e" }}></span>
+            Oppdaterer hvert {Math.round(POLL_MS / 1000)}s
+          </span>
+          <span className="badge">
+            {visible.length} vises (LIVE totalt {counts.all})
+          </span>
+        </div>
+        <div className="badges">
+          <span className="badge" style={{ color: "#6b7280" }}>Kilde: /live</span>
+          <span className="badge" style={{ color: "#6b7280" }}>Logo: /img/teams + /img/tournaments</span>
+        </div>
+      </div>
 
       <div className="focusBar">
         <div className="badges" style={{ marginBottom: 4 }}>
           {FILTERS.map(f => {
             const active = filter === f.key;
-            const n = (f.key === "all") ? counts.all : (f.key === "mizuno") ? counts.mizuno : counts.abroad;
+            const n =
+              f.key === "all"    ? counts.all :
+              f.key === "mizuno" ? counts.mizuno :
+                                   counts.abroad;
 
             return (
               <button
