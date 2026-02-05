@@ -36,30 +36,17 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
-/**
- * Normaliserer group_type til:
- *  - "mizuno"  (Mizuno, Mizuno Norge, osv.)
- *  - "abroad"  (Norske spillere i utlandet, utland, abroad, ...)
- *  - "other"   (alt annet)
- */
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
   if (!s) return null;
-
-  if (s === "mizuno" || s.includes("mizuno")) {
-    return "mizuno";
-  }
-
+  if (s === "mizuno" || s.includes("mizuno")) return "mizuno";
   if (
     s === "abroad" ||
     s.includes("utland") ||
     s.includes("utlandet") ||
     s.includes("norske spillere i utlandet")
-  ) {
-    return "abroad";
-  }
-
+  ) return "abroad";
   return "other";
 }
 
@@ -82,16 +69,10 @@ function currentPoints(ev) {
   };
 }
 
-/**
- * Filtre – i ønsket rekkefølge:
- *  1. Norske spillere ute (abroad)
- *  2. Norge Mizuno (mizuno)
- *  3. Alle
- */
 const FILTERS = [
   { key: "abroad", label: "Norske spillere ute", empty: "Det er ingen norske spillere i aksjon for øyeblikket." },
-  { key: "mizuno", label: "Norge Mizuno",        empty: "Det er ingen pågående kamper i Norsk Mizunoliga." },
-  { key: "all",    label: "Alle",                empty: "Det er ingen pågående kamper for øyeblikket." },
+  { key: "mizuno", label: "Norge Mizuno", empty: "Det er ingen pågående kamper i Mizunoligaen nå." },
+  { key: "other",  label: "Andre", empty: "Det er ingen andre livekamper for øyeblikket." },
 ];
 
 const SetBox = memo(function SetBox(props) {
@@ -205,11 +186,24 @@ function compHeaderText(ev) {
   return t || s || "—";
 }
 
+/**
+ * Stabil ID for kamp – brukt til fokuslogikk
+ */
+function eventId(ev) {
+  return ev.event_id ?? ev.custom_id ?? null;
+}
+
+/**
+ * React key – kan falle tilbake til streng hvis eventId mangler,
+ * men fokus bruker KUN event_id/custom_id.
+ */
 function eventKey(ev) {
+  const id = eventId(ev);
+  if (id != null) return String(id);
   return (
-    ev.event_id ??
-    ev.custom_id ??
-    String(ev.start_ts ?? "") + "-" + String(ev.home_team_name ?? "") + "-" + String(ev.away_team_name ?? "")
+    String(ev.start_ts ?? "") + "-" +
+    String(ev.home_team_name ?? "") + "-" +
+    String(ev.away_team_name ?? "")
   );
 }
 
@@ -254,6 +248,7 @@ function EventCard(props) {
             <LogoBox src={tourLogo} />
             <span>{compHeaderText(ev)}</span>
           </div>
+          <div className="sub">{ev.group_type ? String(ev.group_type) : ""}</div>
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -270,6 +265,7 @@ function EventCard(props) {
 
         <div className="bigScore">
           <div className="pointsMain">
+            {/* Hjemme: ikon overlay til venstre for poeng */}
             <span
               key={"ph-" + (flashInfo.home || 0)}
               className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
@@ -282,6 +278,7 @@ function EventCard(props) {
 
             <span className="pointSep">-</span>
 
+            {/* Borte: ikon overlay til høyre for poeng */}
             <span
               key={"pa-" + (flashInfo.away || 0)}
               className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
@@ -342,13 +339,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filter, setFilter] = useState("all");
-  const [userFilterLocked, setUserFilterLocked] = useState(false);
-
+  const [filter, setFilter] = useState("other");  // "abroad" | "mizuno" | "other"
   const [flash, setFlash] = useState({});
   const [serve, setServe] = useState({});
   const [playLabel, setPlayLabel] = useState({});
-  const [focusedKey, setFocusedKey] = useState(null);
+  const [focusedId, setFocusedId] = useState(null);  // <-- fokus basert på event_id/custom_id
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
@@ -414,12 +409,15 @@ function App() {
 
           if (sideScored) {
             if (prevServe && prevServe.side === sideScored) {
+              // poeng på egen serve -> break-point
               currentServe = { side: sideScored, hot: true };
               label = { side: sideScored, type: "break-point" };
             } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
+              // serve bytter lag -> side-out
               currentServe = { side: sideScored, hot: false };
               label = { side: sideScored, type: "side-out" };
             } else {
+              // første registrerte serve
               currentServe = { side: sideScored, hot: false };
             }
           }
@@ -486,43 +484,29 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  // Telling for filtrene
+  // tell opp per gruppe
   const counts = useMemo(() => {
-    let miz = 0, abr = 0;
-
+    let miz = 0, abr = 0, oth = 0;
     for (let i = 0; i < liveEvents.length; i++) {
       const gt = normalizeGroupType(liveEvents[i].group_type);
       if (gt === "mizuno") miz++;
       else if (gt === "abroad") abr++;
+      else oth++;
     }
-
-    return {
-      all: liveEvents.length,
-      mizuno: miz,
-      abroad: abr,
-    };
+    return { abroad: abr, mizuno: miz, other: oth, all: liveEvents.length };
   }, [liveEvents]);
 
-  /**
-   * Auto-fokus (sortert fokus):
-   *  - Hvis abroad-kamper → filter = "abroad"
-   *  - Ellers hvis mizuno-kamper → filter = "mizuno"
-   *  - Ellers → filter = "all"
-   *  Slutter å overstyre når brukeren selv har valgt et filter.
-   */
+  // velg "smart" standardfilter når counts endrer seg
   useEffect(() => {
-    if (userFilterLocked) return;
-
     if (counts.abroad > 0) {
       setFilter("abroad");
     } else if (counts.mizuno > 0) {
       setFilter("mizuno");
     } else {
-      setFilter("all");
+      setFilter("other");
     }
-  }, [counts, userFilterLocked]);
+  }, [counts.abroad, counts.mizuno, counts.other]);
 
-  // Filtrering av kamper
   const filtered = useMemo(() => {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
@@ -530,42 +514,37 @@ function App() {
     if (filter === "abroad") {
       return arr.filter(ev => normalizeGroupType(ev.group_type) === "abroad");
     }
-
     if (filter === "mizuno") {
       return arr.filter(ev => normalizeGroupType(ev.group_type) === "mizuno");
     }
-
-    // "all": alle, men abroad først, så mizuno, så resten
-    const abroadArr = [];
-    const mizunoArr = [];
-    const otherArr = [];
-
-    for (const ev of arr) {
+    // "other": kun øvrige
+    return arr.filter(ev => {
       const gt = normalizeGroupType(ev.group_type);
-      if (gt === "abroad") abroadArr.push(ev);
-      else if (gt === "mizuno") mizunoArr.push(ev);
-      else otherArr.push(ev);
-    }
-
-    return [...abroadArr, ...mizunoArr, ...otherArr];
+      return gt !== "abroad" && gt !== "mizuno";
+    });
   }, [liveEvents, filter]);
 
+  // Fokuslogikk – basert på event_id/custom_id
   const visible = useMemo(() => {
-    if (!focusedKey) return filtered;
-    const found = filtered.find(ev => eventKey(ev) === focusedKey)
-      || liveEvents.find(ev => eventKey(ev) === focusedKey);
+    if (!focusedId) return filtered;
+
+    const found =
+      filtered.find(ev => eventId(ev) === focusedId) ||
+      liveEvents.find(ev => eventId(ev) === focusedId) ||
+      null;
+
     return found ? [found] : filtered;
-  }, [filtered, focusedKey, liveEvents]);
+  }, [filtered, focusedId, liveEvents]);
 
   const currentFilterObj = FILTERS.find(x => x.key === filter);
 
   // Wake Lock: hold skjerm våken når en live kamp OG aktivt sett er i fokus
   useEffect(() => {
     let focusedEvent = null;
-    if (focusedKey) {
+    if (focusedId != null) {
       focusedEvent =
-        filtered.find(ev => eventKey(ev) === focusedKey) ||
-        liveEvents.find(ev => eventKey(ev) === focusedKey) ||
+        filtered.find(ev => eventId(ev) === focusedId) ||
+        liveEvents.find(ev => eventId(ev) === focusedId) ||
         null;
     }
 
@@ -593,27 +572,24 @@ function App() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [focusedKey, filtered, liveEvents, requestWakeLock, releaseWakeLock]);
+  }, [focusedId, filtered, liveEvents, requestWakeLock, releaseWakeLock]);
 
   return (
     <div className="wrap">
-      {/* Kun filterlinje og kamper – helt ren topp */}
+      {/* Fokus-/filter-linje, ingen ekstra overskrifter */}
       <div className="focusBar">
         <div className="badges" style={{ marginBottom: 4 }}>
           {FILTERS.map(f => {
             const active = filter === f.key;
             const n =
-              f.key === "all"    ? counts.all :
+              f.key === "abroad" ? counts.abroad :
               f.key === "mizuno" ? counts.mizuno :
-                                   counts.abroad;
+              counts.other;
 
             return (
               <button
                 key={f.key}
-                onClick={() => {
-                  setFilter(f.key);
-                  setUserFilterLocked(true);
-                }}
+                onClick={() => { setFilter(f.key); setFocusedId(null); }}
                 className="badge filterBtn"
                 style={{
                   background: active ? "#111827" : "#fafafa",
@@ -628,14 +604,14 @@ function App() {
           })}
         </div>
 
-        {focusedKey && (
-          <button className="backBtn" onClick={() => setFocusedKey(null)}>
+        {focusedId && (
+          <button className="backBtn" onClick={() => setFocusedId(null)}>
             ← Tilbake til alle kamper
           </button>
         )}
       </div>
 
-      {focusedKey && (
+      {focusedId && (
         <div className="focusInfo">
           Viser én kamp i fokus. Skjermen holdes våken bare mens et sett faktisk pågår (der det støttes av nettleseren).
         </div>
@@ -655,20 +631,30 @@ function App() {
 
       <div className="grid">
         {visible.map(ev => {
-          const key = eventKey(ev);
-          const flashInfo = flash[key] || {};
-          const serveInfo = serve[key] || {};
-          const playLabelInfo = playLabel[key] || null;
-          const isFocused = focusedKey === key;
+          const keyStr = eventKey(ev);
+          const flashInfo = flash[keyStr] || {};
+          const serveInfo = serve[keyStr] || {};
+          const playLabelInfo = playLabel[keyStr] || null;
+          const isFocused = focusedId != null && eventId(ev) === focusedId;
+
+          const id = eventId(ev);
+
           return (
             <EventCard
-              key={key}
+              key={keyStr}
               ev={ev}
               flashInfo={flashInfo}
               serveInfo={serveInfo}
               playLabelInfo={playLabelInfo}
               isFocused={isFocused}
-              onClick={() => setFocusedKey(key)}
+              onClick={() => {
+                if (id == null) {
+                  // fall-back: hvis ingen event_id, bruk strengnøkkel
+                  setFocusedId(null);
+                } else {
+                  setFocusedId(prev => (prev === id ? null : id));
+                }
+              }}
             />
           );
         })}
