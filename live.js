@@ -47,12 +47,10 @@ function normalizeGroupType(v) {
   const s = String(v).trim().toLowerCase();
   if (!s) return null;
 
-  // Fanger opp "Mizuno", "Mizuno Norge", osv.
   if (s === "mizuno" || s.includes("mizuno")) {
     return "mizuno";
   }
 
-  // Fanger opp "Norske spillere i utlandet", "utland", "abroad", osv.
   if (
     s === "abroad" ||
     s.includes("utland") ||
@@ -256,9 +254,7 @@ function EventCard(props) {
             <LogoBox src={tourLogo} />
             <span>{compHeaderText(ev)}</span>
           </div>
-          <div className="sub">
-            {ev.group_type ? String(ev.group_type) : ""}
-          </div>
+          {/* Ingen ekstra group-type tekst her – renere kort */}
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -275,7 +271,6 @@ function EventCard(props) {
 
         <div className="bigScore">
           <div className="pointsMain">
-            {/* Hjemme: ikon overlay til venstre for poeng */}
             <span
               key={"ph-" + (flashInfo.home || 0)}
               className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
@@ -288,7 +283,6 @@ function EventCard(props) {
 
             <span className="pointSep">-</span>
 
-            {/* Borte: ikon overlay til høyre for poeng */}
             <span
               key={"pa-" + (flashInfo.away || 0)}
               className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
@@ -348,7 +342,10 @@ function App() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
   const [filter, setFilter] = useState("all");
+  const [userFilterLocked, setUserFilterLocked] = useState(false);
+
   const [flash, setFlash] = useState({});
   const [serve, setServe] = useState({});
   const [playLabel, setPlayLabel] = useState({});
@@ -424,15 +421,12 @@ function App() {
 
           if (sideScored) {
             if (prevServe && prevServe.side === sideScored) {
-              // poeng på egen serve -> break-point
               currentServe = { side: sideScored, hot: true };
               label = { side: sideScored, type: "break-point" };
             } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-              // serve bytter lag -> side-out
               currentServe = { side: sideScored, hot: false };
               label = { side: sideScored, type: "side-out" };
             } else {
-              // første registrerte serve
               currentServe = { side: sideScored, hot: false };
             }
           }
@@ -499,12 +493,7 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  /**
-   * Telling for filtrene:
-   *  - abroad: norske spillere ute
-   *  - mizuno: Norge Mizuno
-   *  - all: alle live
-   */
+  // Telling for filtrene
   const counts = useMemo(() => {
     let miz = 0, abr = 0;
 
@@ -522,15 +511,25 @@ function App() {
   }, [liveEvents]);
 
   /**
-   * Filtrering:
-   *  - "abroad": kun abroad
-   *  - "mizuno": kun mizuno
-   *  - "all": alle, men rekkefølge:
-   *      1) abroad
-   *      2) mizuno
-   *      3) other
-   *    (alle sortert på start_ts innenfor hver gruppe)
+   * Auto-fokus (sortert fokus):
+   *  - Hvis abroad-kamper → filter = "abroad"
+   *  - Ellers hvis mizuno-kamper → filter = "mizuno"
+   *  - Ellers → filter = "all"
+   *  Slutter å overstyre når brukeren selv har valgt et filter.
    */
+  useEffect(() => {
+    if (userFilterLocked) return;
+
+    if (counts.abroad > 0) {
+      setFilter("abroad");
+    } else if (counts.mizuno > 0) {
+      setFilter("mizuno");
+    } else {
+      setFilter("all");
+    }
+  }, [counts, userFilterLocked]);
+
+  // Filtrering av kamper
   const filtered = useMemo(() => {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
@@ -605,30 +604,14 @@ function App() {
 
   return (
     <div className="wrap">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <h1>🏐 Livescore</h1>
+      {/* Kun tema-knapp, ingen overskrift / badges / kilde-tekst */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
         <button
           className="themeToggle"
           onClick={() => setTheme(theme === "light" ? "dark" : "light")}
         >
           {theme === "light" ? "🌙 Mørk bakgrunn" : "🌞 Lys bakgrunn"}
         </button>
-      </div>
-
-      <div className="topbar">
-        <div className="badges">
-          <span className="badge">
-            <span className="dot" style={{ background: "#22c55e" }}></span>
-            Oppdaterer hvert {Math.round(POLL_MS / 1000)}s
-          </span>
-          <span className="badge">
-            {visible.length} vises (LIVE totalt {counts.all})
-          </span>
-        </div>
-        <div className="badges">
-          <span className="badge" style={{ color: "#6b7280" }}>Kilde: /live</span>
-          <span className="badge" style={{ color: "#6b7280" }}>Logo: /img/teams + /img/tournaments</span>
-        </div>
       </div>
 
       <div className="focusBar">
@@ -643,7 +626,10 @@ function App() {
             return (
               <button
                 key={f.key}
-                onClick={() => { setFilter(f.key); }}
+                onClick={() => {
+                  setFilter(f.key);
+                  setUserFilterLocked(true);
+                }}
                 className="badge filterBtn"
                 style={{
                   background: active ? "#111827" : "#fafafa",
