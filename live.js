@@ -318,17 +318,9 @@ function EventCard(props) {
         </div>
       </div>
 
-      <div className="setline">
-        <SetBox label="1" home={ev.home_p1} away={ev.away_p1} highlight={p.setNo === 1} />
-        <SetBox label="2" home={ev.home_p2} away={ev.away_p2} highlight={p.setNo === 2} />
-        <SetBox label="3" home={ev.home_p3} away={ev.away_p3} highlight={p.setNo === 3} />
-        <SetBox label="4" home={ev.home_p4} away={ev.away_p4} highlight={p.setNo === 4} />
-        <SetBox label="5" home={ev.home_p5} away={ev.away_p5} highlight={p.setNo === 5} />
-      </div>
-
+      {/* Meta – kun starttid, ingen Event ID */}
       <div className="meta">
         <span>Start: {formatTs(ev.start_ts)}</span>
-        <span>Event ID: {ev.event_id ?? "—"}</span>
       </div>
     </div>
   );
@@ -343,7 +335,7 @@ function App() {
   const [flash, setFlash] = useState({});
   const [serve, setServe] = useState({});
   const [playLabel, setPlayLabel] = useState({});
-  const [focusedId, setFocusedId] = useState(null);  // <-- fokus basert på event_id/custom_id
+  const [focusedId, setFocusedId] = useState(null);  // fokus basert på event_id/custom_id
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
@@ -576,7 +568,7 @@ function App() {
 
   return (
     <div className="wrap">
-      {/* Fokus-/filter-linje, ingen ekstra overskrifter */}
+      {/* Fokus-/filter-linje */}
       <div className="focusBar">
         <div className="badges" style={{ marginBottom: 4 }}>
           {FILTERS.map(f => {
@@ -649,7 +641,7 @@ function App() {
               isFocused={isFocused}
               onClick={() => {
                 if (id == null) {
-                  // fall-back: hvis ingen event_id, bruk strengnøkkel
+                  // fall-back: hvis ingen event_id, bruk "ingen fokus"
                   setFocusedId(null);
                 } else {
                   setFocusedId(prev => (prev === id ? null : id));
