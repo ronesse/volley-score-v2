@@ -217,11 +217,15 @@ function getTournamentId(ev) {
   return null;
 }
 
+/**
+ * Alltid vis tournament_name fra /live hvis mulig.
+ * Hvis den mangler, bruk season_name som fallback.
+ */
 function compHeaderText(ev) {
   const t = asStr(ev.tournament_name);
+  if (t) return t;
   const s = asStr(ev.season_name);
-  if (t && s) return t + " · " + s;
-  return t || s || "—";
+  return s || "—";
 }
 
 /**
@@ -341,7 +345,7 @@ function EventCard(props) {
     playLabelInfo,
     isFocused,
     onClick,
-    noTeamsInTable,   // fra App
+    noTeamsInTable,   // beholdt for kompatibilitet, men brukes ikke lenger i header
     isAbroadGroup,    // om kampen er "Norske spillere i utlandet"
     norPlayersHome = [],
     norPlayersAway = [],
@@ -377,12 +381,8 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  // Hvis ingen lag finnes i Teams-tabellen, bruk tournament_name som tittel
-  const headerText =
-    (noTeamsInTable && ev.tournament_name)
-      ? String(ev.tournament_name)
-      : compHeaderText(ev);
-
+  // Alltid bruk tournament_name (fra /live) hvis mulig
+  const headerText = compHeaderText(ev);
   const subText = ev.group_type ? String(ev.group_type) : "";
 
   // Sett-bokser
