@@ -284,8 +284,25 @@ function EventCard(props) {
       ? String(ev.tournament_name)
       : compHeaderText(ev);
 
-  // Undertekst: group_type hvis den finnes, ellers tom (vi har allerede turnering i header)
+  // Undertekst: group_type hvis den finnes
   const subText = ev.group_type ? String(ev.group_type) : "";
+
+  // Sett-bokser: bygg liste (vi viser dem bare når kortet er i fokus)
+  const setBoxes = [];
+  for (let i = 1; i <= 5; i++) {
+    const h = ev["home_p" + i];
+    const a = ev["away_p" + i];
+    if (h == null && a == null) continue; // hopp over helt tomme sett
+    setBoxes.push(
+      <SetBox
+        key={i}
+        label={i + ". sett"}
+        home={h}
+        away={a}
+        highlight={p.setNo === i}
+      />
+    );
+  }
 
   return (
     <div className={cls} onClick={onClick} role="button">
@@ -367,7 +384,14 @@ function EventCard(props) {
         </div>
       </div>
 
-      {/* Start-tid er fjernet her på forespørsel */}
+      {/* Sett-bokser kun når kortet er i fokus */}
+      {isFocused && setBoxes.length > 0 && (
+        <div className="setRow">
+          {setBoxes}
+        </div>
+      )}
+
+      {/* Start-tid er bevisst fjernet */}
     </div>
   );
 }
