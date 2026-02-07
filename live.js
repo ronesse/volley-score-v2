@@ -1,4 +1,3 @@
-
 const { useCallback, useEffect, useMemo, useRef, useState, memo } = React;
 
 const API_BASE = "https://volleyball.ronesse.no";
@@ -37,7 +36,7 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
-// Denne brukes ikke lenger til gruppering, men lar vi stå for bakoverkomp. om du trenger den andre steder
+// fortsatt her om du vil bruke den andre steder
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
@@ -71,7 +70,7 @@ function currentPoints(ev) {
   };
 }
 
-// Nye filter-knapper med ønskede navn
+// Filter-knappene
 const FILTERS = [
   { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
   { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
@@ -211,7 +210,7 @@ function eventKey(ev) {
 }
 
 /**
- * Ny: klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
+ * Klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
  *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
  *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
  *  - "other"   : ingen av lagene finnes i teams
@@ -239,7 +238,15 @@ function classifyEventGroup(ev, teamsBySofaId) {
 }
 
 function EventCard(props) {
-  const { ev, flashInfo, serveInfo, playLabelInfo, isFocused, onClick } = props;
+  const {
+    ev,
+    flashInfo,
+    serveInfo,
+    playLabelInfo,
+    isFocused,
+    onClick,
+    noTeamsInTable, // fra App
+  } = props;
 
   const label = liveLabel(ev.status_type);
   const p = currentPoints(ev);
@@ -271,15 +278,41 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
+  // Hvis ingen lag finnes i Teams-tabellen, bruk tournament_name som tittel
+  const headerText =
+    (noTeamsInTable && ev.tournament_name)
+      ? String(ev.tournament_name)
+      : compHeaderText(ev);
+
+  // Undertekst: group_type hvis den finnes
+  const subText = ev.group_type ? String(ev.group_type) : "";
+
+  // Sett-bokser: bygg liste (vi viser dem bare når kortet er i fokus)
+  const setBoxes = [];
+  for (let i = 1; i <= 5; i++) {
+    const h = ev["home_p" + i];
+    const a = ev["away_p" + i];
+    if (h == null && a == null) continue; // hopp over helt tomme sett
+    setBoxes.push(
+      <SetBox
+        key={i}
+        label={i + ". sett"}
+        home={h}
+        away={a}
+        highlight={p.setNo === i}
+      />
+    );
+  }
+
   return (
     <div className={cls} onClick={onClick} role="button">
       <div className="cardHeader">
         <div>
           <div className="compTitle">
             <LogoBox src={tourLogo} />
-            <span>{compHeaderText(ev)}</span>
+            <span>{headerText}</span>
           </div>
-          <div className="sub">{ev.group_type ? String(ev.group_type) : ""}</div>
+          <div className="sub">{subText}</div>
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -332,10 +365,12 @@ function EventCard(props) {
                 Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
               </div>
               {playText && (
-                <div className={
-                  "playLabel " +
-                  (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
-                }>
+                <div
+                  className={
+                    "playLabel " +
+                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
+                  }
+                >
                   {playText}
                 </div>
               )}
@@ -349,10 +384,14 @@ function EventCard(props) {
         </div>
       </div>
 
-      {/* Meta – kun starttid, ingen Event ID */}
-      <div className="meta">
-        <span>Start: {formatTs(ev.start_ts)}</span>
-      </div>
+      {/* Sett-bokser kun når kortet er i fokus */}
+      {isFocused && setBoxes.length > 0 && (
+        <div className="setRow">
+          {setBoxes}
+        </div>
+      )}
+
+      {/* Start-tid er bevisst fjernet */}
     </div>
   );
 }
@@ -368,7 +407,7 @@ function App() {
   const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);  // fokus basert på event_id/custom_id
 
-  // NYTT: teams-data
+  // teams-data
   const [teams, setTeams] = useState([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
 
@@ -552,7 +591,7 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  // tell opp per gruppe med NY logikk (teams + country)
+  // tell opp per gruppe
   const counts = useMemo(() => {
     let miz = 0, abr = 0, oth = 0;
     for (let i = 0; i < liveEvents.length; i++) {
@@ -698,6 +737,10 @@ function App() {
 
           const id = eventId(ev);
 
+          const homeTeam = teamsBySofaId.get(getHomeId(ev));
+          const awayTeam = teamsBySofaId.get(getAwayId(ev));
+          const noTeamsInTable = !homeTeam && !awayTeam;
+
           return (
             <EventCard
               key={keyStr}
@@ -706,6 +749,7 @@ function App() {
               serveInfo={serveInfo}
               playLabelInfo={playLabelInfo}
               isFocused={isFocused}
+              noTeamsInTable={noTeamsInTable}
               onClick={() => {
                 if (id == null) {
                   // fall-back: hvis ingen event_id, bruk "ingen fokus"
