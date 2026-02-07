@@ -245,7 +245,7 @@ function classifyEventGroup(ev, teamsBySofaId) {
    =========================== */
 
 const FLAG_BY_COUNTRY = {
-  // Norge / Skandinavia
+  // Norden
   "Norge": "🇳🇴",
   "Norway": "🇳🇴",
   "Sverige": "🇸🇪",
@@ -253,35 +253,42 @@ const FLAG_BY_COUNTRY = {
   "Danmark": "🇩🇰",
   "Denmark": "🇩🇰",
   "Finland": "🇫🇮",
-  "Finland (eng)": "🇫🇮",
 
-  // Vest-Europa
-  "Nederland": "🇳🇱",
-  "Netherlands": "🇳🇱",
-  "Tyskland": "🇩🇪",
+  // Vest- og Sentral-Europa
   "Germany": "🇩🇪",
-  "Frankrike": "🇫🇷",
+  "Tyskland": "🇩🇪",
   "France": "🇫🇷",
-  "Belgia": "🇧🇪",
-  "Belgium": "🇧🇪",
-  "Spania": "🇪🇸",
-  "Spain": "🇪🇸",
-  "Italia": "🇮🇹",
+  "Frankrike": "🇫🇷",
   "Italy": "🇮🇹",
-  "Østerrike": "🇦🇹",
-  "Austria": "🇦🇹",
-  "Sveits": "🇨🇭",
+  "Italia": "🇮🇹",
+  "Spain": "🇪🇸",
+  "Spania": "🇪🇸",
+  "Netherlands": "🇳🇱",
+  "Nederland": "🇳🇱",
+  "Belgium": "🇧🇪",
+  "Belgia": "🇧🇪",
   "Switzerland": "🇨🇭",
-  "Luxemburg": "🇱🇺",
-  "Luxembourg": "🇱🇺",
+  "Sveits": "🇨🇭",
+  "Austria": "🇦🇹",
+  "Østerrike": "🇦🇹",
+  "Portugal": "🇵🇹",
+  "Greece": "🇬🇷",
 
-  // Øst-Europa / Baltikum
-  "Polen": "🇵🇱",
+  // Øst-Europa / Balkan
   "Poland": "🇵🇱",
-  "Estland": "🇪🇪",
+  "Polen": "🇵🇱",
+  "Czechia": "🇨🇿",
+  "Czech Republic": "🇨🇿",
+  "Croatia": "🇭🇷",
+  "Serbia": "🇷🇸",
+  "Bosnia & Herzegovina": "🇧🇦",
+  "Bosnia and Herzegovina": "🇧🇦",
+
+  // Baltikum
   "Estonia": "🇪🇪",
-  "Litauen": "🇱🇹",
+  "Estland": "🇪🇪",
   "Lithuania": "🇱🇹",
+  "Litauen": "🇱🇹",
   "Latvia": "🇱🇻",
 
   // Nord-Amerika
@@ -290,10 +297,10 @@ const FLAG_BY_COUNTRY = {
   "Canada": "🇨🇦",
 
   // Asia
-  "Japen": "🇯🇵",  // slik det ligger i teams-dataen din
   "Japan": "🇯🇵",
-  "Tyrkia": "🇹🇷",
+  "Japen": "🇯🇵", // som i teams-data
   "Turkey": "🇹🇷",
+  "Tyrkia": "🇹🇷",
 };
 
 function countryWithFlag(name) {
@@ -336,25 +343,43 @@ function deriveCountryLabel(ev, teamsBySofaId) {
     const text = (asStr(ev.tournament_name) + " " + asStr(ev.season_name)).toLowerCase();
 
     const KEYWORD_COUNTRIES = [
+      // Norden
       { canonical: "Norway",    keys: ["norway", "norge"] },
       { canonical: "Sweden",    keys: ["sweden", "sverige"] },
       { canonical: "Denmark",   keys: ["denmark", "danmark"] },
-      { canonical: "Finland",   keys: ["finland"] },
-      { canonical: "Austria",   keys: ["austria", "österr", "oesterreich", "østerrike"] },
-      { canonical: "Poland",    keys: ["poland", "polen"] },
-      { canonical: "Germany",   keys: ["germany", "tyskland"] },
-      { canonical: "France",    keys: ["france", "frankrike"] },
-      { canonical: "Italy",     keys: ["italy", "italia"] },
-      { canonical: "Spain",     keys: ["spain", "spania"] },
+      { canonical: "Finland",   keys: ["finland", "lentopallo"] },
+
+      // Vest- / Sentral-Europa
+      { canonical: "Austria",   keys: ["austria", "österreich", "oesterreich", "østerrike"] },
+      { canonical: "Germany",   keys: ["germany", "bundesliga", "tyskland"] },
+      { canonical: "France",    keys: ["france", "ligue a", "frankrike"] },
+      { canonical: "Italy",     keys: ["italy", "italia", "serie a", "superlega"] },
+      { canonical: "Spain",     keys: ["spain", "superliga"] },
+      { canonical: "Portugal",  keys: ["portugal"] },
+      { canonical: "Greece",    keys: ["greece", "greek"] },
+      { canonical: "Netherlands", keys: ["netherlands", "nederland", "eredivisie"] },
+      { canonical: "Belgium",   keys: ["belgium", "liga heren"] },
       { canonical: "Switzerland", keys: ["switzerland", "sveits"] },
-      { canonical: "Turkey",    keys: ["turkey", "tyrkia"] },
-      { canonical: "Netherlands", keys: ["netherlands", "nederland"] },
-      { canonical: "Estonia",   keys: ["estonia", "estland"] },
+
+      // Øst-Europa / Balkan
+      { canonical: "Poland",    keys: ["poland", "polen", "plusliga", "tauron", "1. liga"] },
+      { canonical: "Czechia",   keys: ["czech", "extraliga"] },
+      { canonical: "Croatia",   keys: ["croatia", "hrvatska"] },
+      { canonical: "Serbia",    keys: ["serbia", "superliga srbije", "srbija"] },
+      { canonical: "Bosnia & Herzegovina", keys: ["bosnia", "herzegovina"] },
+
+      // Baltikum
+      { canonical: "Estonia",   keys: ["estonia", "estland", "baltic league"] },
       { canonical: "Lithuania", keys: ["lithuania", "litauen"] },
       { canonical: "Latvia",    keys: ["latvia"] },
-      { canonical: "USA",       keys: ["usa", "united states", "ncaa"] },
-      { canonical: "Canada",    keys: ["canada"] },
+
+      // Nord-Amerika
+      { canonical: "USA",       keys: ["usa", "united states", "ncaa", "big west", "eiva"] },
+      { canonical: "Canada",    keys: ["canada", "canada west"] },
+
+      // Asia
       { canonical: "Japan",     keys: ["japan", "v.league", "japen"] },
+      { canonical: "Turkey",    keys: ["turkey", "sultanlar", "efeler"] },
     ];
 
     for (const cfg of KEYWORD_COUNTRIES) {
