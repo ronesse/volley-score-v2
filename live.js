@@ -1,27 +1,10 @@
+
 const { useCallback, useEffect, useMemo, useRef, useState, memo } = React;
 
 const API_BASE = "https://volleyball.ronesse.no";
 const POLL_MS = 5000;
 
-/* ========== Shared helpers (som i hub.js) ========== */
 function safeArray(x) { return Array.isArray(x) ? x : []; }
-function asStr(v){ return (v == null) ? "" : String(v).trim(); }
-function nonEmpty(v){ const s = asStr(v); return s ? s : null; }
-function asNum(v){
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function initials(name){
-  const s = asStr(name);
-  if (!s) return "—";
-  const parts = s.split(/\s+/).filter(Boolean);
-  const a = (parts[0]?.[0] || "").toUpperCase();
-  const b = (parts[1]?.[0] || "").toUpperCase();
-  return (a + b) || s.slice(0, 2).toUpperCase();
-}
-
-/* ========== Format / status ========== */
 
 function formatTs(tsSeconds) {
   if (!tsSeconds) return "";
@@ -54,9 +37,10 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
-// beholdt for ev. annen bruk
+// Denne brukes ikke lenger til gruppering, men lar vi stå for bakoverkomp. om du trenger den andre steder
 function normalizeGroupType(v) {
-  const s = asStr(v).toLowerCase();
+  if (v == null) return null;
+  const s = String(v).trim().toLowerCase();
   if (!s) return null;
   if (s === "mizuno" || s.includes("mizuno")) return "mizuno";
   if (
@@ -68,8 +52,7 @@ function normalizeGroupType(v) {
   return "other";
 }
 
-/* ========== Sett / poeng ========== */
-
+// finn pågående sett + poeng
 function currentPoints(ev) {
   let setNo = null;
   const m = String(ev.status_desc || "").match(/(\d+)/);
@@ -88,17 +71,25 @@ function currentPoints(ev) {
   };
 }
 
-/* ========== Filter-knapper ========== */
-
+// Nye filter-knapper med ønskede navn
 const FILTERS = [
   { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
   { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
   { key: "other",  label: "Andre", empty: "Det er ingen andre livekamper for øyeblikket." },
 ];
 
-/* ========== Image cache (som i hub) ========== */
+const SetBox = memo(function SetBox(props) {
+  const style = props.highlight ? { borderColor: "#c7d2fe", background: "#eef2ff" } : null;
+  return (
+    <div className="setbox" style={style}>
+      <div className="label">{props.label}</div>
+      <div className="val">{props.home ?? "—"} - {props.away ?? "—"}</div>
+    </div>
+  );
+});
 
-const imgStatusCache = new Map(); // src -> "ok" | "fail"
+// logo-caching
+const imgStatusCache = new Map();
 
 function useImageStatus(src) {
   const [status, setStatus] = useState(src ? (imgStatusCache.get(src) || "loading") : "none");
@@ -132,7 +123,7 @@ function LogoBox(props) {
   const src = props.src;
   const status = useImageStatus(src);
 
-  if (!src || status !== "ok") {
+  if (!src || status === "fail" || status === "none" || status === "loading") {
     return <span className="logoBox" aria-hidden="true"></span>;
   }
 
@@ -142,40 +133,6 @@ function LogoBox(props) {
     </span>
   );
 }
-
-/* ========== URL-regler (tilpasset hub) ========== */
-
-function teamLogoUrl(sofaTeamId) {
-  const id = nonEmpty(sofaTeamId);
-  if (!id) return null;
-  return API_BASE + "/img/teams/" + id + ".png";
-}
-
-function tournamentLogoUrl(tournamentId) {
-  const id = nonEmpty(tournamentId);
-  if (!id) return null;
-  return API_BASE + "/img/tournaments/" + id + ".png";
-}
-
-function playerPhotoUrl(playerId) {
-  const id = nonEmpty(playerId);
-  if (!id) return null;
-  return API_BASE + "/img/players/" + id + ".jpg";
-}
-
-/* ========== SetBox ========== */
-
-const SetBox = memo(function SetBox(props) {
-  const style = props.highlight ? { borderColor: "#c7d2fe", background: "#eef2ff" } : null;
-  return (
-    <div className="setbox" style={style}>
-      <div className="label">{props.label}</div>
-      <div className="val">{props.home ?? "—"} - {props.away ?? "—"}</div>
-    </div>
-  );
-});
-
-/* ========== Serve-icon ========== */
 
 function ServeIcon({ side, hot }) {
   const className =
@@ -204,8 +161,6 @@ function ServeIcon({ side, hot }) {
   );
 }
 
-/* ========== ID helpers ========== */
-
 function getHomeId(ev) { return ev.home_team_id ?? ev.home_teams_id ?? null; }
 function getAwayId(ev) { return ev.away_team_id ?? ev.away_teams_id ?? null; }
 
@@ -217,9 +172,19 @@ function getTournamentId(ev) {
   return null;
 }
 
+function teamLogoUrl(teamId) {
+  if (teamId == null) return null;
+  return API_BASE + "/img/teams/" + String(teamId) + ".png";
+}
+
+function tournamentLogoUrl(tournamentId) {
+  if (tournamentId == null) return null;
+  return API_BASE + "/img/tournaments/" + String(tournamentId) + ".png";
+}
+
 function compHeaderText(ev) {
-  const t = asStr(ev.tournament_name);
-  const s = asStr(ev.season_name);
+  const t = ev.tournament_name ? String(ev.tournament_name) : "";
+  const s = ev.season_name ? String(ev.season_name) : "";
   if (t && s) return t + " · " + s;
   return t || s || "—";
 }
@@ -245,8 +210,8 @@ function eventKey(ev) {
   );
 }
 
-/* ========== Gruppering basert på teams-tabellen ========== */
 /**
+ * Ny: klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
  *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
  *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
  *  - "other"   : ingen av lagene finnes i teams
@@ -273,79 +238,8 @@ function classifyEventGroup(ev, teamsBySofaId) {
   return "other";
 }
 
-/* ========== Player avatar (norske spillere) ========== */
-
-const PlayerAvatar = memo(function PlayerAvatar({ player }) {
-  const src = playerPhotoUrl(player.id);
-  const status = useImageStatus(src);
-  const name = player.name || "–";
-
-  if (!src || status === "fail" || status === "none" || status === "loading") {
-    // fallback: sirkel med initialer
-    return (
-      <span
-        className="playerAvatar"
-        title={name}
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: "9999px",
-          overflow: "hidden",
-          border: "2px solid #e5e7eb",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#f9fafb",
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      >
-        {initials(name)}
-      </span>
-    );
-  }
-
-  return (
-    <span
-      className="playerAvatar"
-      title={name}
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: "9999px",
-        overflow: "hidden",
-        border: "2px solid #e5e7eb",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#f9fafb",
-      }}
-    >
-      <img
-        src={src}
-        alt={name}
-        loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    </span>
-  );
-});
-
-/* ========== EventCard ========== */
-
 function EventCard(props) {
-  const {
-    ev,
-    flashInfo,
-    serveInfo,
-    playLabelInfo,
-    isFocused,
-    onClick,
-    noTeamsInTable,   // fra App
-    isAbroadGroup,    // om kampen er "Norske spillere i utlandet"
-    norPlayersHome = [],
-    norPlayersAway = [],
-  } = props;
+  const { ev, flashInfo, serveInfo, playLabelInfo, isFocused, onClick } = props;
 
   const label = liveLabel(ev.status_type);
   const p = currentPoints(ev);
@@ -377,42 +271,15 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  // Hvis ingen lag finnes i Teams-tabellen, bruk tournament_name som tittel
-  const headerText =
-    (noTeamsInTable && ev.tournament_name)
-      ? String(ev.tournament_name)
-      : compHeaderText(ev);
-
-  const subText = ev.group_type ? String(ev.group_type) : "";
-
-  // Sett-bokser
-  const setBoxes = [];
-  for (let i = 1; i <= 5; i++) {
-    const h = ev["home_p" + i];
-    const a = ev["away_p" + i];
-    if (h == null && a == null) continue;
-    setBoxes.push(
-      <SetBox
-        key={i}
-        label={i + ". sett"}
-        home={h}
-        away={a}
-        highlight={p.setNo === i}
-      />
-    );
-  }
-
-  const showNorwegians = isFocused && isAbroadGroup;
-
   return (
     <div className={cls} onClick={onClick} role="button">
       <div className="cardHeader">
         <div>
           <div className="compTitle">
             <LogoBox src={tourLogo} />
-            <span>{headerText}</span>
+            <span>{compHeaderText(ev)}</span>
           </div>
-          <div className="sub">{subText}</div>
+          <div className="sub">{ev.group_type ? String(ev.group_type) : ""}</div>
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -423,31 +290,13 @@ function EventCard(props) {
 
       <div className="scoreRow">
         <div className="team">
-          {showNorwegians && norPlayersHome.length > 0 && (
-            <div
-              className="norPlayersRow"
-              style={{
-                display: "flex",
-                gap: 4,
-                marginBottom: 4,
-                flexWrap: "wrap",
-              }}
-            >
-              {norPlayersHome.map(p => (
-                <PlayerAvatar
-                  key={p.id}
-                  player={p}
-                />
-              ))}
-            </div>
-          )}
-
           <LogoBox src={homeLogo} />
           <span className="teamName">{ev.home_team_name}</span>
         </div>
 
         <div className="bigScore">
           <div className="pointsMain">
+            {/* Hjemme: ikon overlay til venstre for poeng */}
             <span
               key={"ph-" + (flashInfo.home || 0)}
               className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
@@ -460,6 +309,7 @@ function EventCard(props) {
 
             <span className="pointSep">-</span>
 
+            {/* Borte: ikon overlay til høyre for poeng */}
             <span
               key={"pa-" + (flashInfo.away || 0)}
               className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
@@ -482,12 +332,10 @@ function EventCard(props) {
                 Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
               </div>
               {playText && (
-                <div
-                  className={
-                    "playLabel " +
-                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
-                  }
-                >
+                <div className={
+                  "playLabel " +
+                  (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
+                }>
                   {playText}
                 </div>
               )}
@@ -496,71 +344,33 @@ function EventCard(props) {
         </div>
 
         <div className="team right">
-          {showNorwegians && norPlayersAway.length > 0 && (
-            <div
-              className="norPlayersRow"
-              style={{
-                display: "flex",
-                gap: 4,
-                marginBottom: 4,
-                justifyContent: "flex-end",
-                flexWrap: "wrap",
-              }}
-            >
-              {norPlayersAway.map(p => (
-                <PlayerAvatar
-                  key={p.id}
-                  player={p}
-                />
-              ))}
-            </div>
-          )}
-
           <LogoBox src={awayLogo} />
           <span className="teamName">{ev.away_team_name}</span>
         </div>
       </div>
 
-      {/* Sett-bokser kun når kortet er i fokus – på rad */}
-      {isFocused && setBoxes.length > 0 && (
-        <div
-          className="setRow"
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          {setBoxes}
-        </div>
-      )}
-
-      {/* Start-tid er fjernet fra kortet med vilje */}
+      {/* Meta – kun starttid, ingen Event ID */}
+      <div className="meta">
+        <span>Start: {formatTs(ev.start_ts)}</span>
+      </div>
     </div>
   );
 }
-
-/* ========== App ========== */
 
 function App() {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filter, setFilter] = useState("other");
+  const [filter, setFilter] = useState("other");  // "abroad" | "mizuno" | "other"
   const [flash, setFlash] = useState({});
   const [serve, setServe] = useState({});
   const [playLabel, setPlayLabel] = useState({});
-  const [focusedId, setFocusedId] = useState(null);
+  const [focusedId, setFocusedId] = useState(null);  // fokus basert på event_id/custom_id
 
-  // teams
+  // NYTT: teams-data
   const [teams, setTeams] = useState([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
-
-  // players
-  const [players, setPlayers] = useState([]);
-  const [playersLoading, setPlayersLoading] = useState(true);
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
@@ -577,15 +387,14 @@ function App() {
     return res.json();
   }, []);
 
-  /* ---- Hent teams ---- */
-
+  // Hent teams én gang for gruppering
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
     (async () => {
       try {
-        const data = await fetchJson("/teams?limit=1000&offset=0", controller.signal);
+        const data = await fetchJson("/teams?limit=200&offset=0", controller.signal);
         if (!cancelled) {
           setTeams(safeArray(data));
         }
@@ -603,46 +412,7 @@ function App() {
     };
   }, [fetchJson]);
 
-  /* ---- Hent players med samme logikk som hub ---- */
-
-  function normalizePlayer(p) {
-    return {
-      id: nonEmpty(p.id),
-      name: asStr(p.name) || "—",
-      nationality: nonEmpty(p.nationality),
-      sofascoreTeamId: asNum(p.sofascore_team_id),
-    };
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    (async () => {
-      try {
-        const data = await fetchJson("/players?limit=1000&offset=0", controller.signal);
-        if (!cancelled) {
-          const arr = Array.isArray(data) ? data : safeArray(data?.items);
-          setPlayers(
-            arr.map(normalizePlayer).filter(p => p && p.id && p.sofascoreTeamId != null)
-          );
-        }
-      } catch (e) {
-        if (String(e && e.name) === "AbortError") return;
-        console.warn("Feil ved henting av players:", e);
-      } finally {
-        if (!cancelled) setPlayersLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [fetchJson]);
-
-  /* ---- Map'er ---- */
-
+  // Map: sofascore_team_id (number) -> team-objekt
   const teamsBySofaId = useMemo(() => {
     const map = new Map();
     for (let i = 0; i < teams.length; i++) {
@@ -657,25 +427,6 @@ function App() {
     }
     return map;
   }, [teams]);
-
-  // sofascore_team_id -> [norske spillere]
-  const playersByTeamSofaId = useMemo(() => {
-    const map = new Map();
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
-      if (!p) continue;
-
-      const isNorwegian = asStr(p.nationality).toLowerCase().includes("nor");
-      if (!isNorwegian) continue;
-
-      const key = p.sofascoreTeamId;
-      if (key == null || Number.isNaN(key)) continue;
-
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(p);
-    }
-    return map;
-  }, [players]);
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -726,12 +477,15 @@ function App() {
 
           if (sideScored) {
             if (prevServe && prevServe.side === sideScored) {
+              // poeng på egen serve -> break-point
               currentServe = { side: sideScored, hot: true };
               label = { side: sideScored, type: "break-point" };
             } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
+              // serve bytter lag -> side-out
               currentServe = { side: sideScored, hot: false };
               label = { side: sideScored, type: "side-out" };
             } else {
+              // første registrerte serve
               currentServe = { side: sideScored, hot: false };
             }
           }
@@ -755,8 +509,7 @@ function App() {
     }
   }, [fetchJson]);
 
-  /* ---- Wake Lock ---- */
-
+  // Wake Lock helpers
   const requestWakeLock = useCallback(async () => {
     try {
       if ('wakeLock' in navigator && navigator.wakeLock && navigator.wakeLock.request) {
@@ -784,8 +537,7 @@ function App() {
     }
   }, []);
 
-  /* ---- Poll / cleanup ---- */
-
+  // Poll / cleanup
   useEffect(() => {
     loadLive();
     pollRef.current = setInterval(loadLive, POLL_MS);
@@ -800,8 +552,7 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  /* ---- tell opp per gruppe ---- */
-
+  // tell opp per gruppe med NY logikk (teams + country)
   const counts = useMemo(() => {
     let miz = 0, abr = 0, oth = 0;
     for (let i = 0; i < liveEvents.length; i++) {
@@ -814,8 +565,7 @@ function App() {
     return { abroad: abr, mizuno: miz, other: oth, all: liveEvents.length };
   }, [liveEvents, teamsBySofaId]);
 
-  /* ---- smart default-filter ---- */
-
+  // velg "smart" standardfilter når counts endrer seg
   useEffect(() => {
     if (counts.mizuno > 0) {
       setFilter("mizuno");
@@ -826,16 +576,14 @@ function App() {
     }
   }, [counts.abroad, counts.mizuno, counts.other]);
 
-  /* ---- filtrerte events ---- */
-
   const filtered = useMemo(() => {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
+
     return arr.filter(ev => classifyEventGroup(ev, teamsBySofaId) === filter);
   }, [liveEvents, filter, teamsBySofaId]);
 
-  /* ---- fokuslogikk ---- */
-
+  // Fokuslogikk – basert på event_id/custom_id
   const visible = useMemo(() => {
     if (!focusedId) return filtered;
 
@@ -849,8 +597,7 @@ function App() {
 
   const currentFilterObj = FILTERS.find(x => x.key === filter);
 
-  /* ---- Wake Lock vs fokus ---- */
-
+  // Wake Lock: hold skjerm våken når en live kamp OG aktivt sett er i fokus
   useEffect(() => {
     let focusedEvent = null;
     if (focusedId != null) {
@@ -885,17 +632,6 @@ function App() {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [focusedId, filtered, liveEvents, requestWakeLock, releaseWakeLock]);
-
-  /* ---- Hjelper: norske spillere for lag ---- */
-
-  function getNorPlayersForTeam(teamId) {
-    if (teamId == null) return [];
-    const key = Number(teamId);
-    if (Number.isNaN(key)) return [];
-    return playersByTeamSofaId.get(key) || [];
-  }
-
-  /* ---- Render ---- */
 
   return (
     <div className="wrap">
@@ -962,15 +698,6 @@ function App() {
 
           const id = eventId(ev);
 
-          const homeTeam = teamsBySofaId.get(getHomeId(ev));
-          const awayTeam = teamsBySofaId.get(getAwayId(ev));
-          const noTeamsInTable = !homeTeam && !awayTeam;
-          const group = classifyEventGroup(ev, teamsBySofaId);
-          const isAbroadGroup = group === "abroad";
-
-          const norPlayersHome = isAbroadGroup ? getNorPlayersForTeam(getHomeId(ev)) : [];
-          const norPlayersAway = isAbroadGroup ? getNorPlayersForTeam(getAwayId(ev)) : [];
-
           return (
             <EventCard
               key={keyStr}
@@ -979,12 +706,9 @@ function App() {
               serveInfo={serveInfo}
               playLabelInfo={playLabelInfo}
               isFocused={isFocused}
-              noTeamsInTable={noTeamsInTable}
-              isAbroadGroup={isAbroadGroup}
-              norPlayersHome={norPlayersHome}
-              norPlayersAway={norPlayersAway}
               onClick={() => {
                 if (id == null) {
+                  // fall-back: hvis ingen event_id, bruk "ingen fokus"
                   setFocusedId(null);
                 } else {
                   setFocusedId(prev => (prev === id ? null : id));
