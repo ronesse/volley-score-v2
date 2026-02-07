@@ -245,30 +245,55 @@ function classifyEventGroup(ev, teamsBySofaId) {
    =========================== */
 
 const FLAG_BY_COUNTRY = {
+  // Norge / Skandinavia
   "Norge": "🇳🇴",
   "Norway": "🇳🇴",
+  "Sverige": "🇸🇪",
+  "Sweden": "🇸🇪",
+  "Danmark": "🇩🇰",
+  "Denmark": "🇩🇰",
+  "Finland": "🇫🇮",
+  "Finland (eng)": "🇫🇮",
+
+  // Vest-Europa
   "Nederland": "🇳🇱",
   "Netherlands": "🇳🇱",
   "Tyskland": "🇩🇪",
   "Germany": "🇩🇪",
-  "Polen": "🇵🇱",
-  "Poland": "🇵🇱",
   "Frankrike": "🇫🇷",
   "France": "🇫🇷",
-  "Spania": "🇪🇸",
-  "Spain": "🇪🇸",
-  "Danmark": "🇩🇰",
-  "Denmark": "🇩🇰",
   "Belgia": "🇧🇪",
   "Belgium": "🇧🇪",
-  "Estland": "🇪🇪",
-  "Estonia": "🇪🇪",
-  "USA": "🇺🇸",
-  "Canada": "🇨🇦",
+  "Spania": "🇪🇸",
+  "Spain": "🇪🇸",
+  "Italia": "🇮🇹",
+  "Italy": "🇮🇹",
+  "Østerrike": "🇦🇹",
+  "Austria": "🇦🇹",
+  "Sveits": "🇨🇭",
+  "Switzerland": "🇨🇭",
   "Luxemburg": "🇱🇺",
   "Luxembourg": "🇱🇺",
-  "Japen": "🇯🇵",   // som i teams-dataen din :)
+
+  // Øst-Europa / Baltikum
+  "Polen": "🇵🇱",
+  "Poland": "🇵🇱",
+  "Estland": "🇪🇪",
+  "Estonia": "🇪🇪",
+  "Litauen": "🇱🇹",
+  "Lithuania": "🇱🇹",
+  "Latvia": "🇱🇻",
+
+  // Nord-Amerika
+  "USA": "🇺🇸",
+  "United States": "🇺🇸",
+  "Canada": "🇨🇦",
+
+  // Asia
+  "Japen": "🇯🇵",  // slik det ligger i teams-dataen din
   "Japan": "🇯🇵",
+  "Tyrkia": "🇹🇷",
+  "Turkey": "🇹🇷",
 };
 
 function countryWithFlag(name) {
@@ -281,7 +306,8 @@ function countryWithFlag(name) {
 /**
  * Prøv å finne country for en kamp:
  * 1. Fra teams-tabellen (home/away)
- * 2. Fallback: fra raw_json.tournament.category.country.name
+ * 2. Fra raw_json.tournament.category.country.name
+ * 3. Fra tournament_name / season_name (tekst-søk på land)
  */
 function deriveCountryLabel(ev, teamsBySofaId) {
   const homeTeam = teamsBySofaId.get(getHomeId(ev));
@@ -292,6 +318,7 @@ function deriveCountryLabel(ev, teamsBySofaId) {
     awayTeam?.country ||
     null;
 
+  // 2) Forsøk å lese fra raw_json (Swagger-json fra SofaScore)
   if (!country && ev.raw_json) {
     try {
       const raw = JSON.parse(ev.raw_json);
@@ -300,7 +327,41 @@ function deriveCountryLabel(ev, teamsBySofaId) {
         raw?.tournament?.category?.name ||
         null;
     } catch (e) {
-      // ignorer
+      // ignorer parse-feil
+    }
+  }
+
+  // 3) Fallback: søk etter land i tournament_name / season_name
+  if (!country) {
+    const text = (asStr(ev.tournament_name) + " " + asStr(ev.season_name)).toLowerCase();
+
+    const KEYWORD_COUNTRIES = [
+      { canonical: "Norway",    keys: ["norway", "norge"] },
+      { canonical: "Sweden",    keys: ["sweden", "sverige"] },
+      { canonical: "Denmark",   keys: ["denmark", "danmark"] },
+      { canonical: "Finland",   keys: ["finland"] },
+      { canonical: "Austria",   keys: ["austria", "österr", "oesterreich", "østerrike"] },
+      { canonical: "Poland",    keys: ["poland", "polen"] },
+      { canonical: "Germany",   keys: ["germany", "tyskland"] },
+      { canonical: "France",    keys: ["france", "frankrike"] },
+      { canonical: "Italy",     keys: ["italy", "italia"] },
+      { canonical: "Spain",     keys: ["spain", "spania"] },
+      { canonical: "Switzerland", keys: ["switzerland", "sveits"] },
+      { canonical: "Turkey",    keys: ["turkey", "tyrkia"] },
+      { canonical: "Netherlands", keys: ["netherlands", "nederland"] },
+      { canonical: "Estonia",   keys: ["estonia", "estland"] },
+      { canonical: "Lithuania", keys: ["lithuania", "litauen"] },
+      { canonical: "Latvia",    keys: ["latvia"] },
+      { canonical: "USA",       keys: ["usa", "united states", "ncaa"] },
+      { canonical: "Canada",    keys: ["canada"] },
+      { canonical: "Japan",     keys: ["japan", "v.league", "japen"] },
+    ];
+
+    for (const cfg of KEYWORD_COUNTRIES) {
+      if (cfg.keys.some(k => text.includes(k))) {
+        country = cfg.canonical;
+        break;
+      }
     }
   }
 
