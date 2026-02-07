@@ -287,12 +287,12 @@ function EventCard(props) {
   // Undertekst: group_type hvis den finnes
   const subText = ev.group_type ? String(ev.group_type) : "";
 
-  // Sett-bokser: bygg liste (vi viser dem bare når kortet er i fokus)
+  // Sett-bokser: bygg liste (bare når kortet er i fokus)
   const setBoxes = [];
   for (let i = 1; i <= 5; i++) {
     const h = ev["home_p" + i];
     const a = ev["away_p" + i];
-    if (h == null && a == null) continue; // hopp over helt tomme sett
+    if (h == null && a == null) continue;
     setBoxes.push(
       <SetBox
         key={i}
@@ -384,9 +384,17 @@ function EventCard(props) {
         </div>
       </div>
 
-      {/* Sett-bokser kun når kortet er i fokus */}
+      {/* Sett-bokser kun når kortet er i fokus – PÅ RAD */}
       {isFocused && setBoxes.length > 0 && (
-        <div className="setRow">
+        <div
+          className="setRow"
+          style={{
+            display: "flex",
+            gap: 8,
+            marginTop: 8,
+            flexWrap: "wrap",
+          }}
+        >
           {setBoxes}
         </div>
       )}
@@ -516,15 +524,12 @@ function App() {
 
           if (sideScored) {
             if (prevServe && prevServe.side === sideScored) {
-              // poeng på egen serve -> break-point
               currentServe = { side: sideScored, hot: true };
               label = { side: sideScored, type: "break-point" };
             } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-              // serve bytter lag -> side-out
               currentServe = { side: sideScored, hot: false };
               label = { side: sideScored, type: "side-out" };
             } else {
-              // første registrerte serve
               currentServe = { side: sideScored, hot: false };
             }
           }
@@ -752,7 +757,6 @@ function App() {
               noTeamsInTable={noTeamsInTable}
               onClick={() => {
                 if (id == null) {
-                  // fall-back: hvis ingen event_id, bruk "ingen fokus"
                   setFocusedId(null);
                 } else {
                   setFocusedId(prev => (prev === id ? null : id));
