@@ -1,4 +1,4 @@
-.const { useEffect, useMemo, useRef, useState } = React;
+const { useEffect, useMemo, useRef, useState } = React;
 
 /* ===========================
    API base
@@ -360,8 +360,8 @@ function App(){
 
     const [liveData, nextData, prevData] = await Promise.all([
       fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
-      fetchJson(API_BASE_EVENTS, /events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0, new AbortController().signal),
-      fetchJson(API_BASE_EVENTS, /events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0, new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
     ]);
 
     const liveArr = safeArray(liveData).map(normalizeEvent);
@@ -388,8 +388,8 @@ function App(){
     try{
       const [liveData, nextData, prevData] = await Promise.all([
         fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
-        fetchJson(API_BASE_EVENTS, /events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0, new AbortController().signal),
-        fetchJson(API_BASE_EVENTS, /events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0, new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
       ]);
 
       const liveArr = safeArray(liveData)
