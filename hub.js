@@ -1,10 +1,23 @@
-const { useCallback, useEffect, useMemo, useRef, useState, memo } = React;
+.const { useEffect, useMemo, useRef, useState } = React;
 
-const API_BASE = "https://volleyball.ronesse.no";
-const POLL_MS = 5000;
+/* ===========================
+   API base
+   =========================== */
+const API_BASE_TEAMS   = "https://volleyball.ronesse.no";
+const API_BASE_PLAYERS = "https://volleyball.ronesse.no";
+const API_BASE_EVENTS  = "https://volleyball.ronesse.no";
 
-/* ========== Shared helpers (som i hub.js) ========== */
-function safeArray(x) { return Array.isArray(x) ? x : []; }
+/* ===========================
+   Settings
+   =========================== */
+const POLL_MS = 15000;
+const LOOKAHEAD_DAYS = 14;
+const LOOKBACK_DAYS = 30;
+
+/* ===========================
+   Helpers
+   =========================== */
+function safeArray(x){ return Array.isArray(x) ? x : []; }
 function asStr(v){ return (v == null) ? "" : String(v).trim(); }
 function nonEmpty(v){ const s = asStr(v); return s ? s : null; }
 function asNum(v){
@@ -18,44 +31,9 @@ function initials(name){
   const parts = s.split(/\s+/).filter(Boolean);
   const a = (parts[0]?.[0] || "").toUpperCase();
   const b = (parts[1]?.[0] || "").toUpperCase();
-  return (a + b) || s.slice(0, 2).toUpperCase();
+  return (a+b) || s.slice(0,2).toUpperCase();
 }
-
-/* ========== Format / status ========== */
-
-function formatTs(tsSeconds) {
-  if (!tsSeconds) return "";
-  const d = new Date(tsSeconds * 1000);
-  return d.toLocaleString("nb-NO", {
-    hour: "2-digit",
-    minute: "2-digit",
-    day: "2-digit",
-    month: "short",
-  });
-}
-
-function liveLabel(statusType) {
-  const t = String(statusType || "").toLowerCase();
-  if (t.includes("inprogress") || t.includes("live") || t.includes("inplay")) return "LIVE";
-  if (t.includes("finished") || t.includes("ended")) return "SLUTT";
-  if (t.includes("not") || t.includes("sched")) return "KOMMER";
-  return statusType || "—";
-}
-
-function isLiveStatus(statusType) {
-  const t = String(statusType || "").toLowerCase();
-  return t.includes("inprogress") || t.includes("live") || t.includes("inplay");
-}
-
-function statusDot(statusType) {
-  const t = String(statusType || "").toLowerCase();
-  if (t.includes("inprogress") || t.includes("live") || t.includes("inplay")) return "dot";
-  if (t.includes("finished") || t.includes("ended")) return "dot gray";
-  return "dot gray";
-}
-
-// beholdt for ev. annen bruk
-function normalizeGroupType(v) {
+function normalizeGroupType(v){
   const s = asStr(v).toLowerCase();
   if (!s) return null;
   if (s === "mizuno" || s.includes("mizuno")) return "mizuno";
@@ -67,935 +45,898 @@ function normalizeGroupType(v) {
   ) return "abroad";
   return "other";
 }
-
-/* ========== Sett / poeng ========== */
-
-function currentPoints(ev) {
-  let setNo = null;
-  const m = String(ev.status_desc || "").match(/(\d+)/);
-  if (m) setNo = Number(m[1]);
-
-  if (!setNo) {
-    for (let i = 5; i >= 1; i--) {
-      if (ev["home_p" + i] != null || ev["away_p" + i] != null) { setNo = i; break; }
-    }
-  }
-
-  return {
-    setNo: setNo,
-    home: setNo ? ev["home_p" + setNo] : null,
-    away: setNo ? ev["away_p" + setNo] : null,
-  };
+function formatTs(tsSeconds){
+  if(!tsSeconds) return "—";
+  const d = new Date(tsSeconds * 1000);
+  return d.toLocaleString("nb-NO", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
 }
 
-/* ========== Filter-knapper ========== */
-
-const FILTERS = [
-  { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
-  { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
-  { key: "other",  label: "Andre", empty: "Det er ingen andre livekamper for øyeblikket." },
-];
-
-/* ========== Image cache (som i hub) ========== */
-
+/* ===========================
+   Image cache (avoid reloading)
+   =========================== */
 const imgStatusCache = new Map(); // src -> "ok" | "fail"
-
-function useImageStatus(src) {
+function useImageStatus(src){
   const [status, setStatus] = useState(src ? (imgStatusCache.get(src) || "loading") : "none");
-
   useEffect(() => {
     if (!src) { setStatus("none"); return; }
-
     const cached = imgStatusCache.get(src);
     if (cached) { setStatus(cached); return; }
 
     setStatus("loading");
     const img = new Image();
-
-    img.onload = function () {
-      imgStatusCache.set(src, "ok");
-      setStatus("ok");
-    };
-
-    img.onerror = function () {
-      imgStatusCache.set(src, "fail");
-      setStatus("fail");
-    };
-
+    img.onload = () => { imgStatusCache.set(src, "ok"); setStatus("ok"); };
+    img.onerror = () => { imgStatusCache.set(src, "fail"); setStatus("fail"); };
     img.src = src;
   }, [src]);
-
   return status;
 }
 
-function LogoBox(props) {
-  const src = props.src;
+function LogoBox({ src, label }){
   const status = useImageStatus(src);
-
-  if (!src || status !== "ok") {
-    return <span className="logoBox" aria-hidden="true"></span>;
-  }
-
-  return (
-    <span className="logoBox" aria-hidden="true">
-      <img src={src} alt="" loading="lazy" />
-    </span>
-  );
+  if (!src || status !== "ok") return <span className="logoBox" aria-hidden="true">{label}</span>;
+  return <span className="logoBox" aria-hidden="true"><img src={src} alt="" loading="lazy" /></span>;
+}
+function MiniLogo({ src }){
+  const status = useImageStatus(src);
+  if (!src || status !== "ok") return <span className="miniLogo" aria-hidden="true"></span>;
+  return <span className="miniLogo" aria-hidden="true"><img src={src} alt="" loading="lazy" /></span>;
 }
 
-/* ========== URL-regler (tilpasset hub) ========== */
-
-function teamLogoUrl(sofaTeamId) {
+/* ===========================
+   Image URL rules
+   =========================== */
+function teamLogoUrl(sofaTeamId){
   const id = nonEmpty(sofaTeamId);
   if (!id) return null;
-  return API_BASE + "/img/teams/" + id + ".png";
+  return API_BASE_EVENTS + "/img/teams/" + id + ".png";
 }
-
-function tournamentLogoUrl(tournamentId) {
+function tournamentLogoUrl(tournamentId){
   const id = nonEmpty(tournamentId);
   if (!id) return null;
-  return API_BASE + "/img/tournaments/" + id + ".png";
+  return API_BASE_EVENTS + "/img/tournaments/" + id + ".png";
 }
-
-function playerPhotoUrl(playerId) {
+function playerPhotoUrl(playerId){
   const id = nonEmpty(playerId);
   if (!id) return null;
-  return API_BASE + "/img/players/" + id + ".jpg";
+  return API_BASE_PLAYERS + "/img/players/" + id + ".jpg";
 }
 
-/* ========== SetBox ========== */
-
-const SetBox = memo(function SetBox(props) {
-  const style = props.highlight ? { borderColor: "#c7d2fe", background: "#eef2ff" } : null;
-  return (
-    <div className="setbox" style={style}>
-      <div className="label">{props.label}</div>
-      <div className="val">{props.home ?? "—"} - {props.away ?? "—"}</div>
-    </div>
-  );
-});
-
-/* ========== Serve-icon ========== */
-
-function ServeIcon({ side, hot }) {
-  const className =
-    "serveIcon " +
-    (side === "home" ? "home" : "away") +
-    (hot ? " hot" : "");
-
-  const isHome = side === "home";
-
-  return (
-    <span
-      className={className}
-      title={
-        hot
-          ? "Break-point (poeng på egen serve)"
-          : "Server"
-      }
-      aria-hidden="true"
-    >
-      <span className="serveIconInner">
-        {hot && isHome && <span>🔥</span>}
-        <span>🏐</span>
-        {hot && !isHome && <span>🔥</span>}
-      </span>
-    </span>
-  );
-}
-
-/* ========== ID helpers ========== */
-
-function getHomeId(ev) { return ev.home_team_id ?? ev.home_teams_id ?? null; }
-function getAwayId(ev) { return ev.away_team_id ?? ev.away_teams_id ?? null; }
-
-function getTournamentId(ev) {
-  if (ev.tournament_id != null) return ev.tournament_id;
-  if (ev.tournamentId != null) return ev.tournamentId;
-  if (ev.tournament && ev.tournament.id != null) return ev.tournament.id;
-  if (typeof ev.tournament === "number" || typeof ev.tournament === "string") return ev.tournament;
+/* ===========================
+   Events helpers
+   =========================== */
+function pickNumber(){
+  for (let i=0;i<arguments.length;i++){
+    const v = arguments[i];
+    if (v === 0) return 0;
+    if (v == null) continue;
+    const n = Number(v);
+    if (!Number.isNaN(n)) return n;
+  }
   return null;
 }
+function extractScore(raw){
+  const homeSets = pickNumber(raw.home_sets, raw.homeScore?.current);
+  const awaySets = pickNumber(raw.away_sets, raw.awayScore?.current);
 
-function compHeaderText(ev) {
-  const t = asStr(ev.tournament_name);
-  const s = asStr(ev.season_name);
+  const sets = [];
+  for (let i=1;i<=5;i++){
+    const hp = pickNumber(raw["home_p"+i], raw.homeScore?.["period"+i]);
+    const ap = pickNumber(raw["away_p"+i], raw.awayScore?.["period"+i]);
+    if (hp != null || ap != null) sets.push({ no:i, home: hp, away: ap });
+  }
+
+  return { homeSets: (homeSets == null ? 0 : homeSets), awaySets: (awaySets == null ? 0 : awaySets), sets };
+}
+function isFinished(raw){
+  const t = String(
+    raw.status_type ??
+    raw.statusType ??
+    raw.status ??
+    raw.status?.type ??
+    raw.status?.description ??
+    ""
+  ).toLowerCase();
+  if (t.includes("finished") || t.includes("ended") || t.includes("complete") || t === "ft") return true;
+  if (raw.winnerCode != null) return true;
+  if (raw.home_sets != null || raw.away_sets != null) return true;
+  if (raw.homeScore?.current != null || raw.awayScore?.current != null) return true;
+  return false;
+}
+function normalizeEvent(raw){
+  const startTs = raw.start_ts ?? raw.startTimestamp ?? null;
+  return {
+    raw,
+    startTs,
+    eventId: raw.event_id ?? raw.id ?? null,
+    homeId: raw.home_team_id ?? raw.homeTeam?.id ?? null,
+    awayId: raw.away_team_id ?? raw.awayTeam?.id ?? null,
+    homeName: raw.home_team_name ?? raw.homeTeam?.name ?? "Home",
+    awayName: raw.away_team_name ?? raw.awayTeam?.name ?? "Away",
+    tournamentId: raw.tournament_id ?? raw.tournament?.id ?? null,
+    tournamentName: raw.tournament_name ?? raw.tournament?.name ?? "",
+    seasonName: raw.season_name ?? raw.season?.name ?? "",
+    groupType: normalizeGroupType(raw.group_type ?? raw.groupType ?? null),
+    score: extractScore(raw),
+  };
+}
+function compHeaderText(e){
+  const t = asStr(e.tournamentName);
+  const s = asStr(e.seasonName);
   if (t && s) return t + " · " + s;
   return t || s || "—";
 }
 
-/**
- * Stabil ID for kamp – brukt til fokuslogikk
- */
-function eventId(ev) {
-  return ev.event_id ?? ev.custom_id ?? null;
+/* key for focus/identity */
+function eventKey(e){
+  return e.eventId ?? (e.homeName + "|" + e.awayName + "|" + (e.startTs ?? ""));
 }
 
+/* ===========================
+   Match card (Hub)
+   =========================== */
 /**
- * React key – kan falle tilbake til streng hvis eventId mangler,
- * men fokus bruker KUN event_id/custom_id.
+ * På hub:
+ * - I listevisning: ingen sett-bokser, bare totalscore (Sett).
+ * - Når et kort er "i fokus" (isFocused=true): vis sett-bokser og Tilbake-knapp.
+ * - Ingen event.html – alt skjer lokalt.
+ * - Fremtidige kamper uten score viser ".. - .." i stedet for "0 - 0".
  */
-function eventKey(ev) {
-  const id = eventId(ev);
-  if (id != null) return String(id);
-  return (
-    String(ev.start_ts ?? "") + "-" +
-    String(ev.home_team_name ?? "") + "-" +
-    String(ev.away_team_name ?? "")
-  );
-}
+function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
+  const hs = e.score?.homeSets ?? 0;
+  const as = e.score?.awaySets ?? 0;
+  const setsArr = safeArray(e.score?.sets);
+  const tourLogo = tournamentLogoUrl(e.tournamentId);
 
-/* ========== Gruppering basert på teams-tabellen ========== */
-/**
- *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
- *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
- *  - "other"   : ingen av lagene finnes i teams
- */
-function classifyEventGroup(ev, teamsBySofaId) {
-  if (!teamsBySofaId || typeof teamsBySofaId.get !== "function") {
-    return "other";
-  }
+  // Hvis kampen åpenbart ikke har startet: vis ".. - .."
+  const hasAnySetPoints = setsArr.length > 0;
+  const hasScore = (hs !== 0 || as !== 0 || hasAnySetPoints);
+  const displayHomeSets = hasScore ? hs : "..";
+  const displayAwaySets = hasScore ? as : "..";
 
-  const homeTeam = teamsBySofaId.get(getHomeId(ev));
-  const awayTeam = teamsBySofaId.get(getAwayId(ev));
-
-  const hasHome = !!homeTeam;
-  const hasAway = !!awayTeam;
-
-  const hasNorwegian =
-    (homeTeam && homeTeam.country === "Norge") ||
-    (awayTeam && awayTeam.country === "Norge");
-
-  const anyKnown = hasHome || hasAway;
-
-  if (hasNorwegian) return "mizuno";
-  if (anyKnown) return "abroad";
-  return "other";
-}
-
-/* ========== Player avatar (norske spillere) ========== */
-
-const PlayerAvatar = memo(function PlayerAvatar({ player }) {
-  const src = playerPhotoUrl(player.id);
-  const status = useImageStatus(src);
-  const name = player.name || "–";
-
-  if (!src || status === "fail" || status === "none" || status === "loading") {
-    // fallback: sirkel med initialer
-    return (
-      <span
-        className="playerAvatar"
-        title={name}
-        style={{
-          width: 28,
-          height: 28,
-          borderRadius: "9999px",
-          overflow: "hidden",
-          border: "2px solid #e5e7eb",
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#f9fafb",
-          fontSize: 11,
-          fontWeight: 700,
-        }}
-      >
-        {initials(name)}
-      </span>
-    );
-  }
+  const handleClick = () => {
+    onToggleFocus();
+  };
 
   return (
-    <span
-      className="playerAvatar"
-      title={name}
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: "9999px",
-        overflow: "hidden",
-        border: "2px solid #e5e7eb",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "#f9fafb",
-      }}
+    <div
+      className={"card matchCard" + (isFocused ? " focused" : "")}
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") handleClick(); }}
+      style={{ cursor:"pointer" }}
     >
-      <img
-        src={src}
-        alt={name}
-        loading="lazy"
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    </span>
-  );
-});
-
-/* ========== EventCard ========== */
-
-function EventCard(props) {
-  const {
-    ev,
-    flashInfo,
-    serveInfo,
-    playLabelInfo,
-    isFocused,
-    onClick,
-    noTeamsInTable,   // fra App
-    isAbroadGroup,    // om kampen er "Norske spillere i utlandet"
-    norPlayersHome = [],
-    norPlayersAway = [],
-  } = props;
-
-  const label = liveLabel(ev.status_type);
-  const p = currentPoints(ev);
-
-  const setsHome = (ev.home_sets ?? 0);
-  const setsAway = (ev.away_sets ?? 0);
-
-  const currentSetText = p.setNo ? (String(p.setNo) + ". sett") : (ev.status_desc || "Pågår");
-
-  const homeId = getHomeId(ev);
-  const awayId = getAwayId(ev);
-  const tournamentId = getTournamentId(ev);
-
-  const homeLogo = teamLogoUrl(homeId);
-  const awayLogo = teamLogoUrl(awayId);
-  const tourLogo = tournamentLogoUrl(tournamentId);
-
-  const isServingHome = serveInfo && serveInfo.side === "home";
-  const isServingAway = serveInfo && serveInfo.side === "away";
-  const hotHome = isServingHome && serveInfo.hot;
-  const hotAway = isServingAway && serveInfo.hot;
-
-  const cls = "card" + (isFocused ? " focused" : "");
-
-  let playText = null;
-  if (playLabelInfo && playLabelInfo.type === "break-point") {
-    playText = "Break-point";
-  } else if (playLabelInfo && playLabelInfo.type === "side-out") {
-    playText = "Side-out";
-  }
-
-  // Hvis ingen lag finnes i Teams-tabellen, bruk tournament_name som tittel
-  const headerText =
-    (noTeamsInTable && ev.tournament_name)
-      ? String(ev.tournament_name)
-      : compHeaderText(ev);
-
-  const subText = ev.group_type ? String(ev.group_type) : "";
-
-  // Sett-bokser
-  const setBoxes = [];
-  for (let i = 1; i <= 5; i++) {
-    const h = ev["home_p" + i];
-    const a = ev["away_p" + i];
-    if (h == null && a == null) continue;
-    setBoxes.push(
-      <SetBox
-        key={i}
-        label={i + ". sett"}
-        home={h}
-        away={a}
-        highlight={p.setNo === i}
-      />
-    );
-  }
-
-  const showNorwegians = isFocused && isAbroadGroup;
-
-  return (
-    <div className={cls} onClick={onClick} role="button">
-      <div className="cardHeader">
-        <div>
-          <div className="compTitle">
-            <LogoBox src={tourLogo} />
-            <span>{headerText}</span>
-          </div>
-          <div className="sub">{subText}</div>
+      <div className="matchHeader">
+        <div className="compTitle" title={compHeaderText(e)}>
+          <MiniLogo src={tourLogo} />
+          <span style={{ minWidth:0 }}>{compHeaderText(e)}</span>
         </div>
-
-        <div className="status" title={ev.status_desc || ""}>
-          <span className={statusDot(ev.status_type)}></span>
-          {label + (ev.status_desc ? " · " + String(ev.status_desc) : "")}
-        </div>
+        <span className="badge">
+          <span className="dot gray"></span>
+          {statusLabel} · {formatTs(e.startTs)}
+        </span>
       </div>
 
       <div className="scoreRow">
         <div className="team">
-          {showNorwegians && norPlayersHome.length > 0 && (
-            <div
-              className="norPlayersRow"
-              style={{
-                display: "flex",
-                gap: 4,
-                marginBottom: 4,
-                flexWrap: "wrap",
-              }}
-            >
-              {norPlayersHome.map(p => (
-                <PlayerAvatar
-                  key={p.id}
-                  player={p}
-                />
-              ))}
-            </div>
-          )}
-
-          <LogoBox src={homeLogo} />
-          <span className="teamName">{ev.home_team_name}</span>
+          <MiniLogo src={teamLogoUrl(e.homeId)} />
+          <span className="teamName">{e.homeName}</span>
         </div>
 
         <div className="bigScore">
-          <div className="pointsMain">
-            <span
-              key={"ph-" + (flashInfo.home || 0)}
-              className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
-            >
-              <span className="pointWrap home">
-                <span className="pointNumber">{p.home ?? "—"}</span>
-                {isServingHome && <ServeIcon side="home" hot={hotHome} />}
-              </span>
-            </span>
-
-            <span className="pointSep">-</span>
-
-            <span
-              key={"pa-" + (flashInfo.away || 0)}
-              className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
-            >
-              <span className="pointWrap away">
-                <span className="pointNumber">{p.away ?? "—"}</span>
-                {isServingAway && <ServeIcon side="away" hot={hotAway} />}
-              </span>
-            </span>
-          </div>
-
-          <div className="points">
-            {setsHome} - {setsAway} i sett
-            {p.setNo ? (" · " + currentSetText) : ""}
-          </div>
-
-          {isFocused && (isServingHome || isServingAway) && (
-            <div className="serveInfoRow">
-              <div>
-                Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
-              </div>
-              {playText && (
-                <div
-                  className={
-                    "playLabel " +
-                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
-                  }
-                >
-                  {playText}
-                </div>
-              )}
-            </div>
-          )}
+          <div className="sets">{displayHomeSets} - {displayAwaySets}</div>
+          <div className="points">Sett</div>
         </div>
 
         <div className="team right">
-          {showNorwegians && norPlayersAway.length > 0 && (
-            <div
-              className="norPlayersRow"
-              style={{
-                display: "flex",
-                gap: 4,
-                marginBottom: 4,
-                justifyContent: "flex-end",
-                flexWrap: "wrap",
-              }}
-            >
-              {norPlayersAway.map(p => (
-                <PlayerAvatar
-                  key={p.id}
-                  player={p}
-                />
-              ))}
-            </div>
-          )}
-
-          <LogoBox src={awayLogo} />
-          <span className="teamName">{ev.away_team_name}</span>
+          <MiniLogo src={teamLogoUrl(e.awayId)} />
+          <span className="teamName">{e.awayName}</span>
         </div>
       </div>
 
-      {/* Sett-bokser kun når kortet er i fokus – på rad */}
-      {isFocused && setBoxes.length > 0 && (
-        <div
-          className="setRow"
-          style={{
-            display: "flex",
-            gap: 8,
-            marginTop: 8,
-            flexWrap: "wrap",
-          }}
-        >
-          {setBoxes}
+      {/* Sett-bokser kun når kortet er i fokus */}
+      {isFocused && (
+        <div className="setline">
+          {[1,2,3,4,5].map(n => {
+            const s = setsArr.find(x => x.no === n);
+            return (
+              <div className="setbox" key={n}>
+                <div className="label">{n}</div>
+                <div className="val">{s?.home ?? "—"} - {s?.away ?? "—"}</div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Start-tid er fjernet fra kortet med vilje */}
+      {/* Bunn-knapp: "Detaljert →" / "Tilbake" */}
+      <div style={{ marginTop: 10, fontSize:12, fontWeight:700, display:"flex", justifyContent:"flex-end" }}>
+        <button
+          type="button"
+          className="btn"
+          style={{ padding:"4px 8px", fontSize:11 }}
+          onClick={(ev) => { ev.stopPropagation(); onToggleFocus(); }}
+        >
+          {isFocused ? "Tilbake" : "Detaljert →"}
+        </button>
+      </div>
     </div>
   );
 }
 
-/* ========== App ========== */
+/* ===========================
+   App
+   =========================== */
+function App(){
+  // Spillere først, deretter lag
+  const [tab, setTab] = useState("players"); // "players" | "teams"
+  const [qTeams, setQTeams] = useState("");
+  const [qPlayers, setQPlayers] = useState("");
 
-function App() {
-  const [events, setEvents] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [players, setPlayers] = useState([]);
+  const [selectedTeam, setSelectedTeam] = useState(null);
+
+  // global matches (for meta)
+  const [live, setLive] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
+  const [finished, setFinished] = useState([]);
+
+  // team view matches
+  const [liveTeam, setLiveTeam] = useState([]);
+  const [nextTeam, setNextTeam] = useState([]);
+  const [prevTeam, setPrevTeam] = useState([]);
+
+  // fokus på enkeltkamp (hub)
+  const [focusedEventKey, setFocusedEventKey] = useState(null);
+
+  // HUB-spesifikke filtre for lag (abroad / mizuno / all)
+  const [teamFilter, setTeamFilter] = useState("all");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filter, setFilter] = useState("other");
-  const [flash, setFlash] = useState({});
-  const [serve, setServe] = useState({});
-  const [playLabel, setPlayLabel] = useState({});
-  const [focusedId, setFocusedId] = useState(null);
-
-  // teams
-  const [teams, setTeams] = useState([]);
-  const [teamsLoading, setTeamsLoading] = useState(true);
-
-  // players
-  const [players, setPlayers] = useState([]);
-  const [playersLoading, setPlayersLoading] = useState(true);
-
   const pollRef = useRef(null);
-  const abortLiveRef = useRef(null);
-  const serveRef = useRef({});
-  const wakeLockRef = useRef(null);
+  const abortRef = useRef(null);
 
-  const fetchJson = useCallback(async (path, signal) => {
-    const res = await fetch(API_BASE + path, {
-      headers: { "Accept": "application/json" },
-      signal: signal,
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
-    return res.json();
-  }, []);
-
-  /* ---- Hent teams ---- */
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    (async () => {
-      try {
-        const data = await fetchJson("/teams?limit=1000&offset=0", controller.signal);
-        if (!cancelled) {
-          setTeams(safeArray(data));
-        }
-      } catch (e) {
-        if (String(e && e.name) === "AbortError") return;
-        console.warn("Feil ved henting av teams:", e);
-      } finally {
-        if (!cancelled) setTeamsLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      controller.abort();
+  function normalizeTeam(t){
+    return {
+      id: nonEmpty(t.id) ?? (t.id === 0 ? "0" : null),
+      name: asStr(t.name) || "—",
+      country: nonEmpty(t.country),
+      league: nonEmpty(t.league),
+      groupType: normalizeGroupType(t.group_type),
+      sofascoreTeamId: asNum(t.sofascore_team_id),
+      tournamentId: nonEmpty(t.tournament_id),
+      widgetName: nonEmpty(t.widget_name),
+      homepageUrl: nonEmpty(t.homepage_url),
+      streamUrl: nonEmpty(t.stream_url),
     };
-  }, [fetchJson]);
-
-  /* ---- Hent players med samme logikk som hub ---- */
-
-  function normalizePlayer(p) {
+  }
+  function normalizePlayer(p){
     return {
       id: nonEmpty(p.id),
       name: asStr(p.name) || "—",
+      position: nonEmpty(p.position),
+      jersey: nonEmpty(p.jersey_number),
       nationality: nonEmpty(p.nationality),
+      externalUrl: nonEmpty(p.external_url),
+      instagram: nonEmpty(p.instagram),
+      heightCm: nonEmpty(p.height_cm),
+      birthYear: nonEmpty(p.birth_year),
+      teamId: nonEmpty(p.team_id),
       sofascoreTeamId: asNum(p.sofascore_team_id),
     };
   }
 
+  async function fetchJson(base, path, signal){
+    const res = await fetch(base + path, { headers:{ "Accept":"application/json" }, signal, cache:"no-store" });
+    if(!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+    return res.json();
+  }
+
+  async function loadCore(){
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError("");
+
+    const [teamsData, playersData] = await Promise.all([
+      fetchJson(API_BASE_TEAMS, "/teams?limit=1000&offset=0", controller.signal),
+      fetchJson(API_BASE_PLAYERS, "/players?limit=1000&offset=0", controller.signal),
+    ]);
+
+    const teamsArr = Array.isArray(teamsData) ? teamsData : safeArray(teamsData?.items);
+    const playersArr = Array.isArray(playersData) ? playersData : safeArray(playersData?.items);
+
+    setTeams(teamsArr.map(normalizeTeam).filter(t => t && t.id));
+    setPlayers(playersArr.map(normalizePlayer).filter(p => p && p.id));
+  }
+
+  async function loadGlobalMatches(){
+    const now = Math.floor(Date.now()/1000);
+    const toNext = now + LOOKAHEAD_DAYS*24*3600;
+    const fromPrev = now - LOOKBACK_DAYS*24*3600;
+
+    const [liveData, nextData, prevData] = await Promise.all([
+      fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, /events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0, new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, /events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0, new AbortController().signal),
+    ]);
+
+    const liveArr = safeArray(liveData).map(normalizeEvent);
+    const nextArr = safeArray(nextData).map(normalizeEvent).filter(e => !isFinished(e.raw)).sort((a,b)=>(a.startTs??0)-(b.startTs??0));
+    const prevArr = safeArray(prevData).map(normalizeEvent).filter(e => isFinished(e.raw)).sort((a,b)=>(b.startTs??0)-(a.startTs??0));
+
+    setLive(liveArr);
+    setUpcoming(nextArr);
+    setFinished(prevArr);
+  }
+
+  async function loadTeamMatches(team){
+    if (!team || team.sofascoreTeamId == null) {
+      setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
+      setFocusedEventKey(null);
+      return;
+    }
+    const teamSofa = team.sofascoreTeamId;
+
+    const now = Math.floor(Date.now()/1000);
+    const toNext = now + LOOKAHEAD_DAYS*24*3600;
+    const fromPrev = now - LOOKBACK_DAYS*24*3600;
+
+    try{
+      const [liveData, nextData, prevData] = await Promise.all([
+        fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, /events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0, new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, /events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0, new AbortController().signal),
+      ]);
+
+      const liveArr = safeArray(liveData)
+        .map(normalizeEvent)
+        .filter(e => e.homeId===teamSofa || e.awayId===teamSofa);
+
+      const nextArr = safeArray(nextData)
+        .map(normalizeEvent)
+        .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && !isFinished(e.raw))
+        .sort((a,b)=>(a.startTs??0)-(b.startTs??0));
+
+      const prevArr = safeArray(prevData)
+        .map(normalizeEvent)
+        .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && isFinished(e.raw))
+        .sort((a,b)=>(b.startTs??0)-(a.startTs??0));
+
+      setLiveTeam(liveArr);
+      setNextTeam(nextArr);
+      setPrevTeam(prevArr);
+      setFocusedEventKey(null);
+    } catch(e){
+      setError(String(e?.message ?? e));
+      setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
+      setFocusedEventKey(null);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
-    const controller = new AbortController();
-
     (async () => {
-      try {
-        const data = await fetchJson("/players?limit=1000&offset=0", controller.signal);
-        if (!cancelled) {
-          const arr = Array.isArray(data) ? data : safeArray(data?.items);
-          setPlayers(
-            arr.map(normalizePlayer).filter(p => p && p.id && p.sofascoreTeamId != null)
-          );
-        }
-      } catch (e) {
-        if (String(e && e.name) === "AbortError") return;
-        console.warn("Feil ved henting av players:", e);
+      try{
+        await loadCore();
+        await loadGlobalMatches();
+        if (cancelled) return;
+
+        pollRef.current = setInterval(async () => {
+          await loadCore();
+          await loadGlobalMatches();
+          if (selectedTeam) {
+            await loadTeamMatches(selectedTeam);
+          }
+        }, POLL_MS);
+      } catch(e){
+        setError(String(e?.message ?? e));
       } finally {
-        if (!cancelled) setPlayersLoading(false);
+        setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      controller.abort();
-    };
-  }, [fetchJson]);
-
-  /* ---- Map'er ---- */
-
-  const teamsBySofaId = useMemo(() => {
-    const map = new Map();
-    for (let i = 0; i < teams.length; i++) {
-      const t = teams[i];
-      if (!t) continue;
-      const raw = t.sofascore_team_id;
-      if (raw == null || raw === "") continue;
-      const key = Number(raw);
-      if (!Number.isNaN(key)) {
-        map.set(key, t);
-      }
-    }
-    return map;
-  }, [teams]);
-
-  // sofascore_team_id -> [norske spillere]
-  const playersByTeamSofaId = useMemo(() => {
-    const map = new Map();
-    for (let i = 0; i < players.length; i++) {
-      const p = players[i];
-      if (!p) continue;
-
-      const isNorwegian = asStr(p.nationality).toLowerCase().includes("nor");
-      if (!isNorwegian) continue;
-
-      const key = p.sofascoreTeamId;
-      if (key == null || Number.isNaN(key)) continue;
-
-      if (!map.has(key)) map.set(key, []);
-      map.get(key).push(p);
-    }
-    return map;
-  }, [players]);
-
-  const loadLive = useCallback(async () => {
-    if (abortLiveRef.current) abortLiveRef.current.abort();
-    const controller = new AbortController();
-    abortLiveRef.current = controller;
-
-    try {
-      setError("");
-      const data = await fetchJson("/live", controller.signal);
-
-      const newServe = {};
-      const newPlayLabel = {};
-
-      setEvents(prevEvents => {
-        const prevPointsMap = new Map();
-        for (let i = 0; i < prevEvents.length; i++) {
-          const ev = prevEvents[i];
-          prevPointsMap.set(eventKey(ev), currentPoints(ev));
-        }
-
-        const prevServeMap = serveRef.current || {};
-        const nextEvents = safeArray(data);
-        const newFlash = {};
-        const base = Date.now();
-
-        for (let i = 0; i < nextEvents.length; i++) {
-          const ev = nextEvents[i];
-          const key = eventKey(ev);
-          const p = currentPoints(ev);
-          const prev = prevPointsMap.get(key) || {};
-          const prevServe = prevServeMap[key] || null;
-
-          let sideScored = null;
-
-          if (p.home != null && prev.home != null && p.home > prev.home) {
-            sideScored = "home";
-            if (!newFlash[key]) newFlash[key] = {};
-            newFlash[key].home = base + Math.random();
-          }
-          if (p.away != null && prev.away != null && p.away > prev.away) {
-            sideScored = "away";
-            if (!newFlash[key]) newFlash[key] = {};
-            newFlash[key].away = base + Math.random();
-          }
-
-          let currentServe = prevServe;
-          let label = null;
-
-          if (sideScored) {
-            if (prevServe && prevServe.side === sideScored) {
-              currentServe = { side: sideScored, hot: true };
-              label = { side: sideScored, type: "break-point" };
-            } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-              currentServe = { side: sideScored, hot: false };
-              label = { side: sideScored, type: "side-out" };
-            } else {
-              currentServe = { side: sideScored, hot: false };
-            }
-          }
-
-          newServe[key] = currentServe || null;
-          if (label) newPlayLabel[key] = label;
-        }
-
-        setFlash(newFlash);
-        return nextEvents;
-      });
-
-      serveRef.current = newServe;
-      setServe(newServe);
-      setPlayLabel(newPlayLabel);
-    } catch (e) {
-      if (String(e && e.name) === "AbortError") return;
-      setError(String((e && e.message) ? e.message : e));
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchJson]);
-
-  /* ---- Wake Lock ---- */
-
-  const requestWakeLock = useCallback(async () => {
-    try {
-      if ('wakeLock' in navigator && navigator.wakeLock && navigator.wakeLock.request) {
-        if (!wakeLockRef.current) {
-          const lock = await navigator.wakeLock.request('screen');
-          wakeLockRef.current = lock;
-          lock.addEventListener('release', () => {
-            wakeLockRef.current = null;
-          });
-        }
-      }
-    } catch (err) {
-      console.warn("WakeLock request feilet:", err);
-    }
-  }, []);
-
-  const releaseWakeLock = useCallback(() => {
-    try {
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release();
-        wakeLockRef.current = null;
-      }
-    } catch (err) {
-      console.warn("WakeLock release feilet:", err);
-    }
-  }, []);
-
-  /* ---- Poll / cleanup ---- */
-
-  useEffect(() => {
-    loadLive();
-    pollRef.current = setInterval(loadLive, POLL_MS);
-    return () => {
       if (pollRef.current) clearInterval(pollRef.current);
-      if (abortLiveRef.current) abortLiveRef.current.abort();
-      releaseWakeLock();
+      if (abortRef.current) abortRef.current.abort();
     };
-  }, [loadLive, releaseWakeLock]);
-
-  const liveEvents = useMemo(() => {
-    return events.filter(ev => isLiveStatus(ev.status_type));
-  }, [events]);
-
-  /* ---- tell opp per gruppe ---- */
-
-  const counts = useMemo(() => {
-    let miz = 0, abr = 0, oth = 0;
-    for (let i = 0; i < liveEvents.length; i++) {
-      const ev = liveEvents[i];
-      const group = classifyEventGroup(ev, teamsBySofaId);
-      if (group === "mizuno") miz++;
-      else if (group === "abroad") abr++;
-      else oth++;
-    }
-    return { abroad: abr, mizuno: miz, other: oth, all: liveEvents.length };
-  }, [liveEvents, teamsBySofaId]);
-
-  /* ---- smart default-filter ---- */
+  }, []);
 
   useEffect(() => {
-    if (counts.mizuno > 0) {
-      setFilter("mizuno");
-    } else if (counts.abroad > 0) {
-      setFilter("abroad");
-    } else {
-      setFilter("other");
-    }
-  }, [counts.abroad, counts.mizuno, counts.other]);
+    if (!selectedTeam) return;
+    loadTeamMatches(selectedTeam);
+  }, [selectedTeam]);
 
-  /* ---- filtrerte events ---- */
+  /* ===========
+     Build "best" tournament/season per team (based on events)
+     =========== */
+  const teamEventMeta = useMemo(() => {
+    const allEvents = [...live, ...upcoming, ...finished];
+    const agg = new Map(); // sofaId -> { tournaments: Map(name->count), seasons: Map(name->count) }
 
-  const filtered = useMemo(() => {
-    const arr = liveEvents.slice();
-    arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
-    return arr.filter(ev => classifyEventGroup(ev, teamsBySofaId) === filter);
-  }, [liveEvents, filter, teamsBySofaId]);
+    for (const e of allEvents) {
+      const ids = [e.homeId, e.awayId];
+      for (const id of ids) {
+        if (id == null) continue;
 
-  /* ---- fokuslogikk ---- */
+        let entry = agg.get(id);
+        if (!entry) {
+          entry = { tournaments: new Map(), seasons: new Map() };
+          agg.set(id, entry);
+        }
 
-  const visible = useMemo(() => {
-    if (!focusedId) return filtered;
+        const tName = asStr(e.tournamentName);
+        const sName = asStr(e.seasonName);
 
-    const found =
-      filtered.find(ev => eventId(ev) === focusedId) ||
-      liveEvents.find(ev => eventId(ev) === focusedId) ||
-      null;
-
-    return found ? [found] : filtered;
-  }, [filtered, focusedId, liveEvents]);
-
-  const currentFilterObj = FILTERS.find(x => x.key === filter);
-
-  /* ---- Wake Lock vs fokus ---- */
-
-  useEffect(() => {
-    let focusedEvent = null;
-    if (focusedId != null) {
-      focusedEvent =
-        filtered.find(ev => eventId(ev) === focusedId) ||
-        liveEvents.find(ev => eventId(ev) === focusedId) ||
-        null;
-    }
-
-    const cp = focusedEvent ? currentPoints(focusedEvent) : null;
-    const hasActiveSet = !!(cp && cp.setNo != null);
-
-    const shouldKeepAwake =
-      !!focusedEvent &&
-      isLiveStatus(focusedEvent.status_type) &&
-      hasActiveSet;
-
-    if (shouldKeepAwake) {
-      requestWakeLock();
-    } else {
-      releaseWakeLock();
-    }
-
-    function handleVisibility() {
-      if (document.visibilityState === "visible" && shouldKeepAwake) {
-        requestWakeLock();
+        if (tName) entry.tournaments.set(tName, (entry.tournaments.get(tName) || 0) + 1);
+        if (sName) entry.seasons.set(sName, (entry.seasons.get(sName) || 0) + 1);
       }
     }
 
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
+    const pickTop = (m) => {
+      let bestName = null;
+      let bestCount = -1;
+      for (const [name, count] of m.entries()) {
+        if (count > bestCount) { bestCount = count; bestName = name; }
+      }
+      return bestName;
     };
-  }, [focusedId, filtered, liveEvents, requestWakeLock, releaseWakeLock]);
 
-  /* ---- Hjelper: norske spillere for lag ---- */
+    const out = new Map();
+    for (const [id, entry] of agg.entries()) {
+      out.set(id, {
+        tournamentName: pickTop(entry.tournaments),
+        seasonName: pickTop(entry.seasons),
+      });
+    }
+    return out;
+  }, [live, upcoming, finished]);
 
-  function getNorPlayersForTeam(teamId) {
-    if (teamId == null) return [];
-    const key = Number(teamId);
-    if (Number.isNaN(key)) return [];
-    return playersByTeamSofaId.get(key) || [];
+  /* ===========
+     Derived lists
+     =========== */
+  // Lag: filtrer på groupType (abroad / mizuno / all) + søk
+  const filteredTeams = useMemo(() => {
+    let base = teams;
+    if (teamFilter === "abroad") {
+      base = base.filter(t => t.groupType === "abroad");
+    } else if (teamFilter === "mizuno") {
+      base = base.filter(t => t.groupType === "mizuno");
+    }
+    const qq = qTeams.trim().toLowerCase();
+    if (qq){
+      base = base.filter(t =>
+        t.name.toLowerCase().includes(qq) ||
+        String(t.country||"").toLowerCase().includes(qq) ||
+        String(t.league||"").toLowerCase().includes(qq) ||
+        String(t.widgetName||"").toLowerCase().includes(qq)
+      );
+    }
+    return base;
+  }, [teams, teamFilter, qTeams]);
+
+  // Gruppér lag på liga
+  const leagueGroups = useMemo(() => {
+    const groups = new Map(); // leagueLabel -> [teams]
+    for (const t of filteredTeams) {
+      const key = t.league || "Uten liga";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    }
+    const result = [];
+    for (const [league, arr] of groups.entries()) {
+      arr.sort((a,b)=>a.name.localeCompare(b.name, "nb"));
+      result.push({ league, teams: arr });
+    }
+    result.sort((a,b)=>a.league.localeCompare(b.league, "nb"));
+    return result;
+  }, [filteredTeams]);
+
+  // Spillere – søk + alfabetisk
+  const visiblePlayers = useMemo(() => {
+    let base = players;
+    const qq = qPlayers.trim().toLowerCase();
+    if (qq){
+      base = base.filter(p =>
+        p.name.toLowerCase().includes(qq) ||
+        String(p.nationality||"").toLowerCase().includes(qq) ||
+        String(p.teamId||"").toLowerCase().includes(qq)
+      );
+    }
+    return [...base].sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+  }, [players, qPlayers]);
+
+  const selectedTeamPlayers = useMemo(() => {
+    if (!selectedTeam || !selectedTeam.id) return [];
+    return players.filter(p => p.teamId === selectedTeam.id).sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+  }, [players, selectedTeam]);
+
+  const selectedMeta = useMemo(() => {
+    if (!selectedTeam || selectedTeam.sofascoreTeamId == null) return null;
+    return teamEventMeta.get(selectedTeam.sofascoreTeamId) || null;
+  }, [selectedTeam, teamEventMeta]);
+
+  /* ===========================
+     UI subcomponents
+     =========================== */
+  function TeamCard({ t }){
+    const meta = (t.sofascoreTeamId != null) ? teamEventMeta.get(t.sofascoreTeamId) : null;
+
+    const line2 = [
+      meta?.tournamentName,
+      meta?.seasonName,
+      t.league,
+      t.country,
+      t.widgetName ? ("Widget: " + t.widgetName) : null,
+    ].filter(Boolean).join(" · ");
+
+    return (
+      <div
+        className="card"
+        onClick={() => {
+          setSelectedTeam(t);
+          setTab("teams");
+          setFocusedEventKey(null);
+        }}
+        style={{ cursor:"pointer" }}
+      >
+        <div className="row">
+          <div className="left">
+            <LogoBox src={teamLogoUrl(t.sofascoreTeamId)} label={initials(t.name)} />
+            <div className="nameBlock">
+              <div className="name">{t.name}</div>
+              <div className="sub">{line2 || "—"}</div>
+            </div>
+          </div>
+          <div className="meta">
+            {t.groupType && <span className="pill">{t.groupType}</span>}
+            {t.sofascoreTeamId != null && <span className="pill">SofaTeam: {t.sofascoreTeamId}</span>}
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  /* ---- Render ---- */
+  function PlayerCardLarge({ p }){
+    const photo = playerPhotoUrl(p.id);
+    const status = useImageStatus(photo);
+    const ig = nonEmpty(p.instagram);
+    const igHandle = ig ? (ig.startsWith("@") ? ig.slice(1) : ig) : null;
+    const igUrl = igHandle ? ("https://instagram.com/" + igHandle) : null;
 
+    const line2 = [
+      p.position,
+      p.jersey ? ("#" + p.jersey) : null,
+      p.nationality,
+      p.heightCm ? (p.heightCm + " cm") : null,
+      p.birthYear ? ("Født " + p.birthYear) : null
+    ].filter(Boolean).join(" · ");
+
+    const playerTeam = p.teamId ? teams.find(t => t.id === p.teamId) : null;
+
+    const handleClick = () => {
+      if (playerTeam) {
+        setSelectedTeam(playerTeam);
+        setTab("teams");
+        setFocusedEventKey(null);
+      }
+    };
+
+    return (
+      <div
+        className="card playerCard"
+        style={{ cursor: playerTeam ? "pointer" : "default" }}
+        onClick={handleClick}
+      >
+        <div
+          className="playerCardInner"
+          style={{ display:"flex", flexWrap:"wrap", gap:12 }}
+        >
+          {/* Bildekolonne – tar omtrent halvparten på større skjermer */}
+          <div
+            className="playerImageCol"
+            style={{
+              flex:"1 1 280px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              alignItems:"stretch"
+            }}
+          >
+            <span
+              className="logoBox playerPhotoBox"
+              aria-hidden="true"
+              style={{
+                width:"100%",
+                height:"100%",
+                maxHeight:240,
+                borderRadius:16,
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                fontWeight:900,
+                fontSize:18,
+              }}
+            >
+              {(!photo || status !== "ok")
+                ? <span>{initials(p.name)}</span>
+                : <img src={photo} alt="" loading="lazy" style={{ width:"100%", height:"100%", objectFit:"cover" }} />}
+            </span>
+          </div>
+
+          {/* Infokolonne – resten av kortet */}
+          <div
+            className="playerInfoCol"
+            style={{
+              flex:"1 1 260px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              flexDirection:"column",
+              gap:8,
+              minHeight: "100%"
+            }}
+          >
+            <div className="nameBlock">
+              <div className="name">{p.name}</div>
+              <div className="sub">{line2 || "—"}</div>
+
+              {playerTeam && (
+                <div
+                  className="sub playerTeamLine"
+                  style={{
+                    display:"flex",
+                    alignItems:"center",
+                    gap:6,
+                    flexWrap:"wrap",
+                    marginTop:4
+                  }}
+                >
+                  <MiniLogo src={teamLogoUrl(playerTeam.sofascoreTeamId)} />
+                  <span>
+                    {playerTeam.name}
+                    {playerTeam.league ? (" · " + playerTeam.league) : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div
+              className="meta"
+              style={{ marginTop:"auto", justifyContent:"flex-start" }}
+            >
+              {p.externalUrl && (
+                <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">
+                  Volleybox →
+                </a>
+              )}
+              {igUrl && (
+                <a className="btn" href={igUrl} target="_blank" rel="noreferrer">
+                  Instagram →
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ===========================
+     Render
+     =========================== */
   return (
     <div className="wrap">
-      {/* Fokus-/filter-linje */}
-      <div className="focusBar">
-        <div className="badges" style={{ marginBottom: 4 }}>
-          {FILTERS.map(f => {
-            const active = filter === f.key;
-            const n =
-              f.key === "abroad" ? counts.abroad :
-              f.key === "mizuno" ? counts.mizuno :
-              counts.other;
-
-            return (
-              <button
-                key={f.key}
-                onClick={() => { setFilter(f.key); setFocusedId(null); }}
-                className="badge filterBtn"
-                style={{
-                  background: active ? "#111827" : "#fafafa",
-                  color: active ? "#ffffff" : "#111827",
-                  borderColor: active ? "#111827" : "var(--border)",
-                }}
-                title={f.label}
-              >
-                {f.label} ({n})
-              </button>
-            );
-          })}
-        </div>
-
-        {focusedId && (
-          <button className="backBtn" onClick={() => setFocusedId(null)}>
-            ← Tilbake til alle kamper
+      {/* Topp: tabs + søk – Spillere først */}
+      <div className="nav" style={{ justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <button
+            className={"btn " + (tab==="players" ? "primary" : "")}
+            onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedEventKey(null); }}
+          >
+            Spillere
           </button>
-        )}
-      </div>
+          <button
+            className={"btn " + (tab==="teams" ? "primary" : "")}
+            onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedEventKey(null); }}
+          >
+            Lag
+          </button>
 
-      {focusedId && (
-        <div className="focusInfo">
-          Viser én kamp i fokus. Skjermen holdes våken bare mens et sett faktisk pågår (der det støttes av nettleseren).
+          {selectedTeam && tab==="teams" && (
+            <button className="btn" onClick={() => { setSelectedTeam(null); setFocusedEventKey(null); }}>
+              ← Tilbake
+            </button>
+          )}
         </div>
-      )}
+
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {tab === "teams" && (
+            <input
+              value={qTeams}
+              onChange={(e)=>setQTeams(e.target.value)}
+              placeholder="Søk lag eller liga…"
+              style={{ minWidth:200 }}
+            />
+          )}
+          {tab === "players" && (
+            <input
+              value={qPlayers}
+              onChange={(e)=>setQPlayers(e.target.value)}
+              placeholder="Søk spiller…"
+              style={{ minWidth:200 }}
+            />
+          )}
+        </div>
+      </div>
 
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
-      {!loading && !error && visible.length === 0 && (
-        <div className="card" style={{ marginTop: 10, cursor: "default" }}>
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>Ingen livekamper</div>
-          <div style={{ color: "#6b7280" }}>
-            {currentFilterObj?.empty}
+      {/* HUB-filtere for lag: Norske spillere ute / Norge Mizuno / Alle */}
+      {tab === "teams" && !selectedTeam && (
+        <div className="focusBar" style={{ marginTop: 4, marginBottom: 4 }}>
+          <div className="badges" style={{ marginBottom: 4 }}>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="abroad" ? "#111827" : "#fafafa",
+                color:      teamFilter==="abroad" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="abroad" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("abroad")}
+            >
+              Norske spillere ute
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="mizuno" ? "#111827" : "#fafafa",
+                color:      teamFilter==="mizuno" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="mizuno" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("mizuno")}
+            >
+              Norge Mizuno
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="all" ? "#111827" : "#fafafa",
+                color:      teamFilter==="all" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="all" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("all")}
+            >
+              Alle
+            </button>
           </div>
         </div>
       )}
 
-      <div className="grid">
-        {visible.map(ev => {
-          const keyStr = eventKey(ev);
-          const flashInfo = flash[keyStr] || {};
-          const serveInfo = serve[keyStr] || {};
-          const playLabelInfo = playLabel[keyStr] || null;
-          const isFocused = focusedId != null && eventId(ev) === focusedId;
+      {/* TEAMS LIST – gruppert på liga */}
+      {tab === "teams" && !selectedTeam && (
+        <div className="grid">
+          {leagueGroups.map(group => (
+            <div key={group.league}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#6b7280",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  margin: "8px 4px 4px",
+                }}
+              >
+                {group.league}
+              </div>
+              {group.teams.map(t => <TeamCard key={t.id} t={t} />)}
+            </div>
+          ))}
+        </div>
+      )}
 
-          const id = eventId(ev);
+      {/* TEAM VIEW */}
+      {tab === "teams" && selectedTeam && (
+        <>
+          {/* Lag-header */}
+          <div className="card">
+            <div className="row">
+              <div className="left">
+                <LogoBox src={teamLogoUrl(selectedTeam.sofascoreTeamId)} label={initials(selectedTeam.name)} />
+                <div className="nameBlock">
+                  <div className="name">{selectedTeam.name}</div>
+                  <div className="sub">
+                    {[
+                      selectedMeta?.tournamentName,
+                      selectedMeta?.seasonName,
+                      selectedTeam.league,
+                      selectedTeam.country,
+                      selectedTeam.widgetName
+                    ].filter(Boolean).join(" · ") || "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="meta">
+                {selectedTeam.groupType && <span className="pill">{selectedTeam.groupType}</span>}
+                {selectedTeam.sofascoreTeamId != null && <span className="pill">SofaTeam: {selectedTeam.sofascoreTeamId}</span>}
+                {selectedTeam.homepageUrl && (
+                  <a className="btn" href={selectedTeam.homepageUrl} target="_blank" rel="noreferrer">Nettside →</a>
+                )}
+                {selectedTeam.streamUrl && (
+                  <a className="btn" href={selectedTeam.streamUrl} target="_blank" rel="noreferrer">Stream →</a>
+                )}
+              </div>
+            </div>
+          </div>
 
-          const homeTeam = teamsBySofaId.get(getHomeId(ev));
-          const awayTeam = teamsBySofaId.get(getAwayId(ev));
-          const noTeamsInTable = !homeTeam && !awayTeam;
-          const group = classifyEventGroup(ev, teamsBySofaId);
-          const isAbroadGroup = group === "abroad";
+          {/* Spillere for laget – norske først */}
+          {selectedTeamPlayers.length > 0 && (
+            <div className="grid">
+              {selectedTeamPlayers
+                .filter(p => asStr(p.nationality).toLowerCase().includes("nor"))
+                .map(p => <PlayerCardLarge key={p.id} p={p} />)}
+              {selectedTeamPlayers
+                .filter(p => !asStr(p.nationality).toLowerCase().includes("nor"))
+                .map(p => <PlayerCardLarge key={p.id} p={p} />)}
+            </div>
+          )}
 
-          const norPlayersHome = isAbroadGroup ? getNorPlayersForTeam(getHomeId(ev)) : [];
-          const norPlayersAway = isAbroadGroup ? getNorPlayersForTeam(getAwayId(ev)) : [];
+          {/* Kamper – alle listet, sett-bokser kun på fokusert kamp */}
+          <div className="grid">
+            {liveTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="LIVE"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
+            {nextTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="NEXT"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
+            {prevTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="FINISHED"
+                  isFocused={focusedEventKey === k}
+                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
 
-          return (
-            <EventCard
-              key={keyStr}
-              ev={ev}
-              flashInfo={flashInfo}
-              serveInfo={serveInfo}
-              playLabelInfo={playLabelInfo}
-              isFocused={isFocused}
-              noTeamsInTable={noTeamsInTable}
-              isAbroadGroup={isAbroadGroup}
-              norPlayersHome={norPlayersHome}
-              norPlayersAway={norPlayersAway}
-              onClick={() => {
-                if (id == null) {
-                  setFocusedId(null);
-                } else {
-                  setFocusedId(prev => (prev === id ? null : id));
-                }
-              }}
-            />
-          );
-        })}
-      </div>
+      {/* PLAYERS TAB – spillere først */}
+      {tab === "players" && (
+        <div className="grid">
+          {visiblePlayers.map(p => <PlayerCardLarge key={p.id} p={p} />)}
+        </div>
+      )}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("live-root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("hub-root")).render(<App />);
