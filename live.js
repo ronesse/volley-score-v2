@@ -36,7 +36,7 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
-// fortsatt her for ev. annen bruk
+// fortsatt her om du vil bruke den andre steder
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
@@ -70,7 +70,7 @@ function currentPoints(ev) {
   };
 }
 
-// Filtre/knapper
+// Filter-knappene
 const FILTERS = [
   { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
   { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
@@ -245,7 +245,7 @@ function EventCard(props) {
     playLabelInfo,
     isFocused,
     onClick,
-    noTeamsInTable, // NY prop
+    noTeamsInTable, // fra App
   } = props;
 
   const label = liveLabel(ev.status_type);
@@ -278,10 +278,14 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  // Her kommer ønsket: fallback til tournament_name hvis lagene ikke finnes i Teams-tabellen
-  const subText = ev.group_type
-    ? String(ev.group_type)
-    : (noTeamsInTable && ev.tournament_name ? String(ev.tournament_name) : "");
+  // Hvis ingen lag finnes i Teams-tabellen, bruk tournament_name som tittel
+  const headerText =
+    (noTeamsInTable && ev.tournament_name)
+      ? String(ev.tournament_name)
+      : compHeaderText(ev);
+
+  // Undertekst: group_type hvis den finnes, ellers tom (vi har allerede turnering i header)
+  const subText = ev.group_type ? String(ev.group_type) : "";
 
   return (
     <div className={cls} onClick={onClick} role="button">
@@ -289,7 +293,7 @@ function EventCard(props) {
         <div>
           <div className="compTitle">
             <LogoBox src={tourLogo} />
-            <span>{compHeaderText(ev)}</span>
+            <span>{headerText}</span>
           </div>
           <div className="sub">{subText}</div>
         </div>
@@ -344,10 +348,12 @@ function EventCard(props) {
                 Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
               </div>
               {playText && (
-                <div className={
-                  "playLabel " +
-                  (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
-                }>
+                <div
+                  className={
+                    "playLabel " +
+                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
+                  }
+                >
                   {playText}
                 </div>
               )}
@@ -361,10 +367,7 @@ function EventCard(props) {
         </div>
       </div>
 
-      {/* Meta – kun starttid, ingen Event ID */}
-      <div className="meta">
-        <span>Start: {formatTs(ev.start_ts)}</span>
-      </div>
+      {/* Start-tid er fjernet her på forespørsel */}
     </div>
   );
 }
