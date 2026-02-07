@@ -36,6 +36,7 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
+// Denne brukes ikke lenger til gruppering, men lar vi stå for bakoverkomp. om du trenger den andre steder
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
@@ -69,9 +70,10 @@ function currentPoints(ev) {
   };
 }
 
+// Nye filter-knapper med ønskede navn
 const FILTERS = [
-  { key: "abroad", label: "Norske spillere ute", empty: "Det er ingen norske spillere i aksjon for øyeblikket." },
-  { key: "mizuno", label: "Norge Mizuno", empty: "Det er ingen pågående kamper i Mizunoligaen nå." },
+  { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
+  { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
   { key: "other",  label: "Andre", empty: "Det er ingen andre livekamper for øyeblikket." },
 ];
 
@@ -207,6 +209,34 @@ function eventKey(ev) {
   );
 }
 
+/**
+ * Ny: klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
+ *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
+ *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
+ *  - "other"   : ingen av lagene finnes i teams
+ */
+function classifyEventGroup(ev, teamsBySofaId) {
+  if (!teamsBySofaId || typeof teamsBySofaId.get !== "function") {
+    return "other";
+  }
+
+  const homeTeam = teamsBySofaId.get(getHomeId(ev));
+  const awayTeam = teamsBySofaId.get(getAwayId(ev));
+
+  const hasHome = !!homeTeam;
+  const hasAway = !!awayTeam;
+
+  const hasNorwegian =
+    (homeTeam && homeTeam.country === "Norge") ||
+    (awayTeam && awayTeam.country === "Norge");
+
+  const anyKnown = hasHome || hasAway;
+
+  if (hasNorwegian) return "mizuno";
+  if (anyKnown) return "abroad";
+  return "other";
+}
+
 function EventCard(props) {
   const { ev, flashInfo, serveInfo, playLabelInfo, isFocused, onClick } = props;
 
@@ -337,6 +367,10 @@ function App() {
   const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);  // fokus basert på event_id/custom_id
 
+  // NYTT: teams-data
+  const [teams, setTeams] = useState([]);
+  const [teamsLoading, setTeamsLoading] = useState(true);
+
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
   const serveRef = useRef({});
@@ -351,6 +385,47 @@ function App() {
     if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
     return res.json();
   }, []);
+
+  // Hent teams én gang for gruppering
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const data = await fetchJson("/teams?limit=200&offset=0", controller.signal);
+        if (!cancelled) {
+          setTeams(safeArray(data));
+        }
+      } catch (e) {
+        if (String(e && e.name) === "AbortError") return;
+        console.warn("Feil ved henting av teams:", e);
+      } finally {
+        if (!cancelled) setTeamsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [fetchJson]);
+
+  // Map: sofascore_team_id (number) -> team-objekt
+  const teamsBySofaId = useMemo(() => {
+    const map = new Map();
+    for (let i = 0; i < teams.length; i++) {
+      const t = teams[i];
+      if (!t) continue;
+      const raw = t.sofascore_team_id;
+      if (raw == null || raw === "") continue;
+      const key = Number(raw);
+      if (!Number.isNaN(key)) {
+        map.set(key, t);
+      }
+    }
+    return map;
+  }, [teams]);
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -476,24 +551,25 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  // tell opp per gruppe
+  // tell opp per gruppe med NY logikk (teams + country)
   const counts = useMemo(() => {
     let miz = 0, abr = 0, oth = 0;
     for (let i = 0; i < liveEvents.length; i++) {
-      const gt = normalizeGroupType(liveEvents[i].group_type);
-      if (gt === "mizuno") miz++;
-      else if (gt === "abroad") abr++;
+      const ev = liveEvents[i];
+      const group = classifyEventGroup(ev, teamsBySofaId);
+      if (group === "mizuno") miz++;
+      else if (group === "abroad") abr++;
       else oth++;
     }
     return { abroad: abr, mizuno: miz, other: oth, all: liveEvents.length };
-  }, [liveEvents]);
+  }, [liveEvents, teamsBySofaId]);
 
   // velg "smart" standardfilter når counts endrer seg
   useEffect(() => {
-    if (counts.abroad > 0) {
-      setFilter("abroad");
-    } else if (counts.mizuno > 0) {
+    if (counts.mizuno > 0) {
       setFilter("mizuno");
+    } else if (counts.abroad > 0) {
+      setFilter("abroad");
     } else {
       setFilter("other");
     }
@@ -503,18 +579,8 @@ function App() {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
 
-    if (filter === "abroad") {
-      return arr.filter(ev => normalizeGroupType(ev.group_type) === "abroad");
-    }
-    if (filter === "mizuno") {
-      return arr.filter(ev => normalizeGroupType(ev.group_type) === "mizuno");
-    }
-    // "other": kun øvrige
-    return arr.filter(ev => {
-      const gt = normalizeGroupType(ev.group_type);
-      return gt !== "abroad" && gt !== "mizuno";
-    });
-  }, [liveEvents, filter]);
+    return arr.filter(ev => classifyEventGroup(ev, teamsBySofaId) === filter);
+  }, [liveEvents, filter, teamsBySofaId]);
 
   // Fokuslogikk – basert på event_id/custom_id
   const visible = useMemo(() => {
