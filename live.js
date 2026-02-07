@@ -218,14 +218,26 @@ function getTournamentId(ev) {
 }
 
 /**
- * Alltid vis tournament_name fra /live hvis mulig.
- * Hvis den mangler, bruk season_name som fallback.
+ * Alltid vis turneringsnavn fra /live hvis mulig.
+ * Støtter både toppnivå og nested struktur:
+ *  - ev.tournament_name
+ *  - ev.tournament.name
+ * Fallback videre til season:
+ *  - ev.season_name
+ *  - ev.season.name
  */
 function compHeaderText(ev) {
-  const t = asStr(ev.tournament_name);
+  const t =
+    asStr(ev.tournament_name) ||
+    asStr(ev.tournament && ev.tournament.name);
   if (t) return t;
-  const s = asStr(ev.season_name);
-  return s || "—";
+
+  const s =
+    asStr(ev.season_name) ||
+    asStr(ev.season && ev.season.name);
+  if (s) return s;
+
+  return "—";
 }
 
 /**
@@ -345,7 +357,7 @@ function EventCard(props) {
     playLabelInfo,
     isFocused,
     onClick,
-    noTeamsInTable,   // beholdt for kompatibilitet, men brukes ikke lenger i header
+    noTeamsInTable,   // beholdt for kompatibilitet, men ikke brukt i header
     isAbroadGroup,    // om kampen er "Norske spillere i utlandet"
     norPlayersHome = [],
     norPlayersAway = [],
@@ -381,7 +393,7 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  // Alltid bruk tournament_name (fra /live) hvis mulig
+  // Alltid bruk turneringsnavn fra compHeaderText
   const headerText = compHeaderText(ev);
   const subText = ev.group_type ? String(ev.group_type) : "";
 
