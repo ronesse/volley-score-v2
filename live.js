@@ -241,156 +241,304 @@ function classifyEventGroup(ev, teamsBySofaId) {
 }
 
 /* ===========================
-   Country + flagg
+   Land + flagg (Europa, Afrika, Sør-Amerika ++)
    =========================== */
 
-const FLAG_BY_COUNTRY = {
-  // Norden
-  "Norge": "🇳🇴",
-  "Norway": "🇳🇴",
-  "Sverige": "🇸🇪",
-  "Sweden": "🇸🇪",
-  "Danmark": "🇩🇰",
-  "Denmark": "🇩🇰",
-  "Finland": "🇫🇮",
+// alias-navn (engelsk + noen norske) -> ISO2
+const COUNTRY_ALIASES = {
+  // ===== EUROPA =====
+  "norway": "NO", "norge": "NO",
+  "sweden": "SE", "sverige": "SE",
+  "denmark": "DK", "danmark": "DK",
+  "finland": "FI",
+  "iceland": "IS", "island": "IS",
 
-  // Vest- og Sentral-Europa
-  "Germany": "🇩🇪",
-  "Tyskland": "🇩🇪",
-  "France": "🇫🇷",
-  "Frankrike": "🇫🇷",
-  "Italy": "🇮🇹",
-  "Italia": "🇮🇹",
-  "Spain": "🇪🇸",
-  "Spania": "🇪🇸",
-  "Netherlands": "🇳🇱",
-  "Nederland": "🇳🇱",
-  "Belgium": "🇧🇪",
-  "Belgia": "🇧🇪",
-  "Switzerland": "🇨🇭",
-  "Sveits": "🇨🇭",
-  "Austria": "🇦🇹",
-  "Østerrike": "🇦🇹",
-  "Portugal": "🇵🇹",
-  "Greece": "🇬🇷",
+  "germany": "DE", "tyskland": "DE",
+  "france": "FR", "frankrike": "FR",
+  "italy": "IT", "italia": "IT",
+  "spain": "ES", "spania": "ES",
+  "portugal": "PT",
+  "netherlands": "NL", "nederland": "NL",
+  "belgium": "BE", "belgia": "BE",
+  "switzerland": "CH", "sveits": "CH",
+  "austria": "AT", "østerrike": "AT", "oesterreich": "AT",
 
-  // Øst-Europa / Balkan
-  "Poland": "🇵🇱",
-  "Polen": "🇵🇱",
-  "Czechia": "🇨🇿",
-  "Czech Republic": "🇨🇿",
-  "Croatia": "🇭🇷",
-  "Serbia": "🇷🇸",
-  "Bosnia & Herzegovina": "🇧🇦",
-  "Bosnia and Herzegovina": "🇧🇦",
+  "poland": "PL", "polen": "PL",
+  "czechia": "CZ", "czech republic": "CZ",
+  "slovakia": "SK",
+  "hungary": "HU", "ungarn": "HU",
+  "romania": "RO",
+  "bulgaria": "BG",
+  "slovenia": "SI",
+  "croatia": "HR",
+  "serbia": "RS",
+  "bosnia": "BA", "bosnia and herzegovina": "BA",
+  "montenegro": "ME",
+  "north macedonia": "MK", "macedonia": "MK",
+  "albania": "AL",
+  "greece": "GR",
+  "turkey": "TR", "tyrkia": "TR",
+  "ukraine": "UA",
+  "belarus": "BY",
+  "moldova": "MD",
+  "latvia": "LV",
+  "lithuania": "LT", "litauen": "LT",
+  "estonia": "EE", "estland": "EE",
+  "ireland": "IE",
+  "scotland": "GB",
+  "england": "GB",
+  "wales": "GB",
+  "kosovo": "XK",
+  "andorra": "AD",
+  "monaco": "MC",
+  "liechtenstein": "LI",
+  "luxembourg": "LU",
+  "san marino": "SM",
+  "malta": "MT",
+  "cyprus": "CY",
 
-  // Baltikum
-  "Estonia": "🇪🇪",
-  "Estland": "🇪🇪",
-  "Lithuania": "🇱🇹",
-  "Litauen": "🇱🇹",
-  "Latvia": "🇱🇻",
+  // ===== SØR-AMERIKA =====
+  "brazil": "BR", "brasil": "BR",
+  "argentina": "AR",
+  "chile": "CL",
+  "uruguay": "UY",
+  "paraguay": "PY",
+  "bolivia": "BO",
+  "peru": "PE",
+  "ecuador": "EC",
+  "colombia": "CO",
+  "venezuela": "VE",
+  "suriname": "SR",
+  "guyana": "GY",
 
-  // Nord-Amerika
-  "USA": "🇺🇸",
-  "United States": "🇺🇸",
-  "Canada": "🇨🇦",
+  // ===== AFRIKA =====
+  "south africa": "ZA",
+  "egypt": "EG",
+  "tunisia": "TN",
+  "morocco": "MA", "marokko": "MA",
+  "algeria": "DZ",
+  "nigeria": "NG",
+  "ghana": "GH",
+  "senegal": "SN",
+  "ivory coast": "CI", "cote d'ivoire": "CI",
+  "cameroon": "CM",
+  "kenya": "KE",
+  "uganda": "UG",
+  "tanzania": "TZ",
+  "ethiopia": "ET",
+  "angola": "AO",
+  "zambia": "ZM",
+  "zimbabwe": "ZW",
+  "mozambique": "MZ",
+  "namibia": "NA",
+  "botswana": "BW",
+  "madagascar": "MG",
+  "mali": "ML",
+  "niger": "NE",
+  "chad": "TD",
+  "sudan": "SD",
+  "south sudan": "SS",
+  "somalia": "SO",
+  "libya": "LY",
+  "democratic republic of the congo": "CD",
+  "congo": "CG",
+  "rwanda": "RW",
+  "burundi": "BI",
+  "sierra leone": "SL",
+  "liberia": "LR",
+  "benin": "BJ",
+  "togo": "TG",
+  "gambia": "GM",
+  "guinea": "GN",
+  "guinea-bissau": "GW",
+  "mauritania": "MR",
+  "cape verde": "CV", "cabo verde": "CV",
 
-  // Asia
-  "Japan": "🇯🇵",
-  "Japen": "🇯🇵", // som i teams-data
-  "Turkey": "🇹🇷",
-  "Tyrkia": "🇹🇷",
+  // Litt ekstra utenom forespørselen men nyttig
+  "usa": "US", "united states": "US",
+  "canada": "CA",
+  "japan": "JP", "japen": "JP",
 };
 
-function countryWithFlag(name) {
-  const c = asStr(name);
-  if (!c) return null;
-  const flag = FLAG_BY_COUNTRY[c] || "";
-  return flag ? (flag + " " + c) : c;
+const ISO_LABEL = {
+  NO: "Norway",
+  SE: "Sweden",
+  DK: "Denmark",
+  FI: "Finland",
+  IS: "Iceland",
+  DE: "Germany",
+  FR: "France",
+  IT: "Italy",
+  ES: "Spain",
+  PT: "Portugal",
+  NL: "Netherlands",
+  BE: "Belgium",
+  CH: "Switzerland",
+  AT: "Austria",
+  PL: "Poland",
+  CZ: "Czechia",
+  SK: "Slovakia",
+  HU: "Hungary",
+  RO: "Romania",
+  BG: "Bulgaria",
+  SI: "Slovenia",
+  HR: "Croatia",
+  RS: "Serbia",
+  BA: "Bosnia & Herzegovina",
+  ME: "Montenegro",
+  MK: "North Macedonia",
+  AL: "Albania",
+  GR: "Greece",
+  TR: "Turkey",
+  UA: "Ukraine",
+  BY: "Belarus",
+  MD: "Moldova",
+  LV: "Latvia",
+  LT: "Lithuania",
+  EE: "Estonia",
+  IE: "Ireland",
+  GB: "United Kingdom",
+  XK: "Kosovo",
+  AD: "Andorra",
+  MC: "Monaco",
+  LI: "Liechtenstein",
+  LU: "Luxembourg",
+  SM: "San Marino",
+  MT: "Malta",
+  CY: "Cyprus",
+
+  BR: "Brazil",
+  AR: "Argentina",
+  CL: "Chile",
+  UY: "Uruguay",
+  PY: "Paraguay",
+  BO: "Bolivia",
+  PE: "Peru",
+  EC: "Ecuador",
+  CO: "Colombia",
+  VE: "Venezuela",
+  SR: "Suriname",
+  GY: "Guyana",
+
+  ZA: "South Africa",
+  EG: "Egypt",
+  TN: "Tunisia",
+  MA: "Morocco",
+  DZ: "Algeria",
+  NG: "Nigeria",
+  GH: "Ghana",
+  SN: "Senegal",
+  CI: "Ivory Coast",
+  CM: "Cameroon",
+  KE: "Kenya",
+  UG: "Uganda",
+  TZ: "Tanzania",
+  ET: "Ethiopia",
+  AO: "Angola",
+  ZM: "Zambia",
+  ZW: "Zimbabwe",
+  MZ: "Mozambique",
+  NA: "Namibia",
+  BW: "Botswana",
+  MG: "Madagascar",
+  ML: "Mali",
+  NE: "Niger",
+  TD: "Chad",
+  SD: "Sudan",
+  SS: "South Sudan",
+  SO: "Somalia",
+  LY: "Libya",
+  CD: "DR Congo",
+  CG: "Congo",
+  RW: "Rwanda",
+  BI: "Burundi",
+  SL: "Sierra Leone",
+  LR: "Liberia",
+  BJ: "Benin",
+  TG: "Togo",
+  GM: "Gambia",
+  GN: "Guinea",
+  GW: "Guinea-Bissau",
+  MR: "Mauritania",
+  CV: "Cabo Verde",
+
+  US: "United States",
+  CA: "Canada",
+  JP: "Japan",
+};
+
+function isoToFlag(iso) {
+  if (!iso || iso.length !== 2) return null;
+  const codePoints = [...iso.toUpperCase()]
+    .map(c => 0x1F1E6 + c.charCodeAt(0) - 65);
+  return String.fromCodePoint(...codePoints);
 }
 
 /**
- * Prøv å finne country for en kamp:
- * 1. Fra teams-tabellen (home/away)
- * 2. Fra raw_json.tournament.category.country.name
- * 3. Fra tournament_name / season_name (tekst-søk på land)
+ * 1. Forsøk å finne land via teams.country
+ * 2. Deretter via raw_json.tournament.category.country.name
+ * 3. Til slutt via tekstmatch i tournament_name + season_name
  */
 function deriveCountryLabel(ev, teamsBySofaId) {
-  const homeTeam = teamsBySofaId.get(getHomeId(ev));
-  const awayTeam = teamsBySofaId.get(getAwayId(ev));
+  const home = teamsBySofaId.get(getHomeId(ev));
+  const away = teamsBySofaId.get(getAwayId(ev));
 
-  let country =
-    homeTeam?.country ||
-    awayTeam?.country ||
+  let raw =
+    home?.country ||
+    away?.country ||
     null;
 
-  // 2) Forsøk å lese fra raw_json (Swagger-json fra SofaScore)
-  if (!country && ev.raw_json) {
+  // 2) raw_json
+  if (!raw && ev.raw_json) {
     try {
-      const raw = JSON.parse(ev.raw_json);
-      country =
-        raw?.tournament?.category?.country?.name ||
-        raw?.tournament?.category?.name ||
+      const j = JSON.parse(ev.raw_json);
+      raw =
+        j?.tournament?.category?.country?.name ||
+        j?.tournament?.category?.name ||
         null;
     } catch (e) {
-      // ignorer parse-feil
+      // ignorer
     }
   }
 
-  // 3) Fallback: søk etter land i tournament_name / season_name
-  if (!country) {
-    const text = (asStr(ev.tournament_name) + " " + asStr(ev.season_name)).toLowerCase();
-
-    const KEYWORD_COUNTRIES = [
-      // Norden
-      { canonical: "Norway",    keys: ["norway", "norge"] },
-      { canonical: "Sweden",    keys: ["sweden", "sverige"] },
-      { canonical: "Denmark",   keys: ["denmark", "danmark"] },
-      { canonical: "Finland",   keys: ["finland", "lentopallo"] },
-
-      // Vest- / Sentral-Europa
-      { canonical: "Austria",   keys: ["austria", "österreich", "oesterreich", "østerrike"] },
-      { canonical: "Germany",   keys: ["germany", "bundesliga", "tyskland"] },
-      { canonical: "France",    keys: ["france", "ligue a", "frankrike"] },
-      { canonical: "Italy",     keys: ["italy", "italia", "serie a", "superlega"] },
-      { canonical: "Spain",     keys: ["spain", "superliga"] },
-      { canonical: "Portugal",  keys: ["portugal"] },
-      { canonical: "Greece",    keys: ["greece", "greek"] },
-      { canonical: "Netherlands", keys: ["netherlands", "nederland", "eredivisie"] },
-      { canonical: "Belgium",   keys: ["belgium", "liga heren"] },
-      { canonical: "Switzerland", keys: ["switzerland", "sveits"] },
-
-      // Øst-Europa / Balkan
-      { canonical: "Poland",    keys: ["poland", "polen", "plusliga", "tauron", "1. liga"] },
-      { canonical: "Czechia",   keys: ["czech", "extraliga"] },
-      { canonical: "Croatia",   keys: ["croatia", "hrvatska"] },
-      { canonical: "Serbia",    keys: ["serbia", "superliga srbije", "srbija"] },
-      { canonical: "Bosnia & Herzegovina", keys: ["bosnia", "herzegovina"] },
-
-      // Baltikum
-      { canonical: "Estonia",   keys: ["estonia", "estland", "baltic league"] },
-      { canonical: "Lithuania", keys: ["lithuania", "litauen"] },
-      { canonical: "Latvia",    keys: ["latvia"] },
-
-      // Nord-Amerika
-      { canonical: "USA",       keys: ["usa", "united states", "ncaa", "big west", "eiva"] },
-      { canonical: "Canada",    keys: ["canada", "canada west"] },
-
-      // Asia
-      { canonical: "Japan",     keys: ["japan", "v.league", "japen"] },
-      { canonical: "Turkey",    keys: ["turkey", "sultanlar", "efeler"] },
-    ];
-
-    for (const cfg of KEYWORD_COUNTRIES) {
-      if (cfg.keys.some(k => text.includes(k))) {
-        country = cfg.canonical;
-        break;
-      }
-    }
+  // 3) Tekst-søk i tournament/season
+  if (!raw) {
+    raw = `${ev.tournament_name || ""} ${ev.season_name || ""}`;
   }
 
-  return countryWithFlag(country);
+  const text = asStr(raw).toLowerCase();
+  if (!text) return null;
+
+  let iso = null;
+  for (const key in COUNTRY_ALIASES) {
+    if (text.includes(key)) {
+      iso = COUNTRY_ALIASES[key];
+      break;
+    }
+  }
+  if (!iso) return null;
+
+  const flag = isoToFlag(iso);
+  const label = ISO_LABEL[iso] || iso;
+  return flag ? `${flag} ${label}` : label;
+}
+
+/* ===========================
+   Liga-nivå
+   =========================== */
+/**
+ * Forsøk å hente "liga/level" for kampen:
+ * - først fra teams.league
+ * - så ev.season_name
+ * - til slutt ev.tournament_name (fallback)
+ */
+function deriveLeagueLevel(ev, teamsBySofaId) {
+  const home = teamsBySofaId.get(getHomeId(ev));
+  const away = teamsBySofaId.get(getAwayId(ev));
+  const fromTeam = home?.league || away?.league || null;
+  const s = asStr(ev.season_name);
+  const t = asStr(ev.tournament_name);
+  return fromTeam || s || t || null;
 }
 
 /* ===========================
@@ -469,6 +617,7 @@ function EventCard(props) {
     norPlayersHome = [],
     norPlayersAway = [],
     countryLabel,
+    leagueLevel,
   } = props;
 
   const label = liveLabel(ev.status_type);
@@ -500,8 +649,10 @@ function EventCard(props) {
   }
 
   const headerTournament = asStr(ev.tournament_name) || "—";
+
   const subParts = [];
   if (countryLabel) subParts.push(countryLabel);
+  if (leagueLevel) subParts.push(leagueLevel);
   if (ev.group_type) subParts.push(String(ev.group_type));
   const subText = subParts.join(" · ");
 
@@ -655,7 +806,7 @@ function EventCard(props) {
         </div>
       )}
 
-      {/* Starttid bevisst fjernet */}
+      {/* Starttid er bevisst fjernet */}
     </div>
   );
 }
@@ -1085,6 +1236,7 @@ function App() {
           const norPlayersAway = isAbroadGroup ? getNorPlayersForTeam(getAwayId(ev)) : [];
 
           const countryLabel = deriveCountryLabel(ev, teamsBySofaId);
+          const leagueLevel = deriveLeagueLevel(ev, teamsBySofaId);
 
           return (
             <EventCard
@@ -1098,6 +1250,7 @@ function App() {
               norPlayersHome={norPlayersHome}
               norPlayersAway={norPlayersAway}
               countryLabel={countryLabel}
+              leagueLevel={leagueLevel}
               onClick={() => {
                 if (id == null) {
                   setFocusedId(null);
