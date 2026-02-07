@@ -36,7 +36,7 @@ function statusDot(statusType) {
   return "dot gray";
 }
 
-// Denne brukes ikke lenger til gruppering, men lar vi stå for bakoverkomp. om du trenger den andre steder
+// fortsatt her for ev. annen bruk
 function normalizeGroupType(v) {
   if (v == null) return null;
   const s = String(v).trim().toLowerCase();
@@ -70,7 +70,7 @@ function currentPoints(ev) {
   };
 }
 
-// Nye filter-knapper med ønskede navn
+// Filtre/knapper
 const FILTERS = [
   { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
   { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
@@ -210,7 +210,7 @@ function eventKey(ev) {
 }
 
 /**
- * Ny: klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
+ * Klassifiser kamp i en av tre grupper basert på lag i teams-tabellen:
  *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
  *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
  *  - "other"   : ingen av lagene finnes i teams
@@ -238,7 +238,15 @@ function classifyEventGroup(ev, teamsBySofaId) {
 }
 
 function EventCard(props) {
-  const { ev, flashInfo, serveInfo, playLabelInfo, isFocused, onClick } = props;
+  const {
+    ev,
+    flashInfo,
+    serveInfo,
+    playLabelInfo,
+    isFocused,
+    onClick,
+    noTeamsInTable, // NY prop
+  } = props;
 
   const label = liveLabel(ev.status_type);
   const p = currentPoints(ev);
@@ -270,6 +278,11 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
+  // Her kommer ønsket: fallback til tournament_name hvis lagene ikke finnes i Teams-tabellen
+  const subText = ev.group_type
+    ? String(ev.group_type)
+    : (noTeamsInTable && ev.tournament_name ? String(ev.tournament_name) : "");
+
   return (
     <div className={cls} onClick={onClick} role="button">
       <div className="cardHeader">
@@ -278,7 +291,7 @@ function EventCard(props) {
             <LogoBox src={tourLogo} />
             <span>{compHeaderText(ev)}</span>
           </div>
-          <div className="sub">{ev.group_type ? String(ev.group_type) : ""}</div>
+          <div className="sub">{subText}</div>
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
@@ -367,7 +380,7 @@ function App() {
   const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);  // fokus basert på event_id/custom_id
 
-  // NYTT: teams-data
+  // teams-data
   const [teams, setTeams] = useState([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
 
@@ -551,7 +564,7 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  // tell opp per gruppe med NY logikk (teams + country)
+  // tell opp per gruppe
   const counts = useMemo(() => {
     let miz = 0, abr = 0, oth = 0;
     for (let i = 0; i < liveEvents.length; i++) {
@@ -697,6 +710,10 @@ function App() {
 
           const id = eventId(ev);
 
+          const homeTeam = teamsBySofaId.get(getHomeId(ev));
+          const awayTeam = teamsBySofaId.get(getAwayId(ev));
+          const noTeamsInTable = !homeTeam && !awayTeam;
+
           return (
             <EventCard
               key={keyStr}
@@ -705,6 +722,7 @@ function App() {
               serveInfo={serveInfo}
               playLabelInfo={playLabelInfo}
               isFocused={isFocused}
+              noTeamsInTable={noTeamsInTable}
               onClick={() => {
                 if (id == null) {
                   // fall-back: hvis ingen event_id, bruk "ingen fokus"
