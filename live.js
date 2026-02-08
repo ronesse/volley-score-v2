@@ -50,7 +50,6 @@ function statusDot(statusType) {
    Sett / poeng
    =========================== */
 
-// finn pågående sett + poeng
 function currentPoints(ev) {
   let setNo = null;
   const m = String(ev.status_desc || "").match(/(\d+)/);
@@ -214,11 +213,7 @@ function eventKey(ev) {
 /* ===========================
    Grupplogikk (teams-tabellen)
    =========================== */
-/**
- *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
- *  - "abroad"  : minst ett lag finnes i teams, men ingen med country === "Norge"
- *  - "other"   : ingen av lagene finnes i teams
- */
+
 function classifyEventGroup(ev, teamsBySofaId) {
   if (!teamsBySofaId || typeof teamsBySofaId.get !== "function") {
     return "other";
@@ -248,20 +243,16 @@ function getTournamentAndSeason(ev) {
   let tournament = asStr(ev.tournament_name);
   let season = asStr(ev.season_name);
 
-  // Direkte nested fra live
   if (!tournament && ev.tournament?.name) {
     tournament = asStr(ev.tournament.name);
   }
   if (!season && ev.season?.name) {
     season = asStr(ev.season.name);
   }
-
-  // tournament.season
   if (!season && ev.tournament?.season?.name) {
     season = asStr(ev.tournament.season.name);
   }
 
-  // raw_json
   if (ev.raw_json && (!tournament || !season)) {
     try {
       const raw = JSON.parse(ev.raw_json);
@@ -277,9 +268,7 @@ function getTournamentAndSeason(ev) {
           asStr(raw?.season?.name) ||
           asStr(raw?.tournament?.season?.name);
       }
-    } catch (e) {
-      // ignorer parse-feil
-    }
+    } catch (e) {}
   }
 
   return {
@@ -289,18 +278,16 @@ function getTournamentAndSeason(ev) {
 }
 
 /* ===========================
-   Land + flagg (Europa, Afrika, Sør-Amerika ++)
+   Land + flagg
    =========================== */
 
-// alias-navn (engelsk + noen norske) -> ISO2
 const COUNTRY_ALIASES = {
-  // ===== EUROPA =====
+  // Europa
   "norway": "NO", "norge": "NO",
   "sweden": "SE", "sverige": "SE",
   "denmark": "DK", "danmark": "DK",
   "finland": "FI",
   "iceland": "IS", "island": "IS",
-
   "germany": "DE", "tyskland": "DE",
   "france": "FR", "frankrike": "FR",
   "italy": "IT", "italia": "IT",
@@ -310,7 +297,6 @@ const COUNTRY_ALIASES = {
   "belgium": "BE", "belgia": "BE",
   "switzerland": "CH", "sveits": "CH",
   "austria": "AT", "østerrike": "AT", "oesterreich": "AT",
-
   "poland": "PL", "polen": "PL",
   "czechia": "CZ", "czech republic": "CZ",
   "slovakia": "SK",
@@ -345,7 +331,7 @@ const COUNTRY_ALIASES = {
   "malta": "MT",
   "cyprus": "CY",
 
-  // ===== SØR-AMERIKA =====
+  // Sør-Amerika
   "brazil": "BR", "brasil": "BR",
   "argentina": "AR",
   "chile": "CL",
@@ -359,7 +345,7 @@ const COUNTRY_ALIASES = {
   "suriname": "SR",
   "guyana": "GY",
 
-  // ===== AFRIKA =====
+  // Afrika
   "south africa": "ZA",
   "egypt": "EG",
   "tunisia": "TN",
@@ -522,11 +508,6 @@ function isoToFlag(iso) {
   return String.fromCodePoint(...codePoints);
 }
 
-/**
- * 1. Forsøk å finne land via teams.country
- * 2. Deretter via raw_json.tournament.category.country.name
- * 3. Til slutt via tekstmatch i tournament/season
- */
 function deriveCountryLabel(ev, teamsBySofaId) {
   const home = teamsBySofaId.get(getHomeId(ev));
   const away = teamsBySofaId.get(getAwayId(ev));
@@ -536,7 +517,6 @@ function deriveCountryLabel(ev, teamsBySofaId) {
     away?.country ||
     null;
 
-  // 2) raw_json
   if (!raw && ev.raw_json) {
     try {
       const j = JSON.parse(ev.raw_json);
@@ -544,12 +524,9 @@ function deriveCountryLabel(ev, teamsBySofaId) {
         j?.tournament?.category?.country?.name ||
         j?.tournament?.category?.name ||
         null;
-    } catch (e) {
-      // ignorer
-    }
+    } catch (e) {}
   }
 
-  // 3) Tekst-søk i tournament/season
   if (!raw) {
     const ts = getTournamentAndSeason(ev);
     raw = `${ts.tournament || ""} ${ts.season || ""}`;
@@ -575,11 +552,7 @@ function deriveCountryLabel(ev, teamsBySofaId) {
 /* ===========================
    Liga-nivå + playoff/finals
    =========================== */
-/**
- * Liga/nivå: 
- * - For Mizuno Norge: bruk kun season/tournament fra /live
- * - For andre: bruk league fra teams hvis den er konsistent, ellers season/tournament
- */
+
 function deriveLeagueLevel(ev, teamsBySofaId) {
   const { season, tournament } = getTournamentAndSeason(ev);
 
@@ -591,41 +564,30 @@ function deriveLeagueLevel(ev, teamsBySofaId) {
 
   const group = classifyEventGroup(ev, teamsBySofaId);
 
-  // Mizuno: vis Eliteserien osv fra /live, ikke "Eredivisie 25/26" fra ToppVolley i teams-tabellen
   if (group === "mizuno") {
     return season || tournament || homeLeague || awayLeague || null;
   }
 
-  // Utenlandske lag: league fra teams er ofte best (PlusLiga, Ligue A, osv.)
   if (homeLeague && awayLeague && homeLeague === awayLeague) {
     return homeLeague;
   }
   if (homeLeague && !awayLeague) return homeLeague;
   if (awayLeague && !homeLeague) return awayLeague;
 
-  // fallback når league er utydelig
   return season || tournament || homeLeague || awayLeague || null;
 }
 
-/**
- * Stage/playoff/finals:
- * - roundInfo.name (fra raw_json) => Kvartfinale, Semifinale, Finale, Sluttspill, etc.
- */
 function deriveStageLabel(ev) {
   let rawStage = null;
 
-  // Evt. direkte felt
   if (ev.round_name) rawStage = asStr(ev.round_name);
   if (!rawStage && ev.roundInfo?.name) rawStage = asStr(ev.roundInfo.name);
 
-  // Fra raw_json
   if (!rawStage && ev.raw_json) {
     try {
       const j = JSON.parse(ev.raw_json);
       rawStage = asStr(j?.roundInfo?.name);
-    } catch (e) {
-      // ignorér
-    }
+    } catch (e) {}
   }
 
   if (!rawStage) return null;
@@ -651,7 +613,6 @@ function deriveStageLabel(ev) {
     return "Seriespill";
   }
 
-  // fallback: bruk originaltekst
   return rawStage;
 }
 
@@ -665,7 +626,6 @@ const PlayerAvatar = memo(function PlayerAvatar({ player }) {
   const name = player.name || "–";
 
   if (!src || status === "fail" || status === "none" || status === "loading") {
-    // fallback: sirkel med initialer
     return (
       <span
         className="playerAvatar"
@@ -754,10 +714,10 @@ function EventCard(props) {
   const hotHome = isServingHome && serveInfo.hot;
   const hotAway = isServingAway && serveInfo.hot;
 
-  // Hvilken side scoret sist? (brukes til lampe + ball/flamme)
-  const scoredSide = flashInfo && flashInfo.home
-    ? "home"
-    : (flashInfo && flashInfo.away ? "away" : null);
+  // hvilken side scoret sist (basert på flashInfo)?
+  const scoredSide =
+    flashInfo && flashInfo.home ? "home" :
+    (flashInfo && flashInfo.away ? "away" : null);
 
   const cls = "card" + (isFocused ? " focused" : "");
 
@@ -784,7 +744,6 @@ function EventCard(props) {
   if (ev.group_type) subParts.push(String(ev.group_type));
   const subText = subParts.join(" · ");
 
-  // Sett-bokser
   const setBoxes = [];
   for (let i = 1; i <= 5; i++) {
     const h = ev["home_p" + i];
@@ -936,7 +895,6 @@ function EventCard(props) {
         </div>
       </div>
 
-      {/* Sett-bokser kun når kortet er i fokus – på rad */}
       {isFocused && setBoxes.length > 0 && (
         <div
           className="setRow"
@@ -950,8 +908,6 @@ function EventCard(props) {
           {setBoxes}
         </div>
       )}
-
-      {/* Starttid er bevisst fjernet */}
     </div>
   );
 }
@@ -971,7 +927,6 @@ function App() {
   const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);
 
-  // teams + players
   const [teams, setTeams] = useState([]);
   const [players, setPlayers] = useState([]);
 
@@ -1067,7 +1022,6 @@ function App() {
     return map;
   }, [teams]);
 
-  // sofascore_team_id -> [norske spillere]
   const playersByTeamSofaId = useMemo(() => {
     const map = new Map();
     for (let i = 0; i < players.length; i++) {
@@ -1086,7 +1040,7 @@ function App() {
     return map;
   }, [players]);
 
-  /* ---- Hent live og oppdater flash/serve ---- */
+  /* ---- Hent live og scoringslogikk ---- */
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -1117,25 +1071,39 @@ function App() {
           const key = eventKey(ev);
           const p = currentPoints(ev);
           const prev = prevPointsMap.get(key) || {};
-          const prevServe = prevServeMap[key] || null;
+
+          const homeNow = (p.home != null) ? Number(p.home) : null;
+          const awayNow = (p.away != null) ? Number(p.away) : null;
+          const homePrev = (prev.home != null) ? Number(prev.home) : null;
+          const awayPrev = (prev.away != null) ? Number(prev.away) : null;
+
+          const homeDelta = (homeNow != null && homePrev != null) ? (homeNow - homePrev) : 0;
+          const awayDelta = (awayNow != null && awayPrev != null) ? (awayNow - awayPrev) : 0;
 
           let sideScored = null;
 
-          if (p.home != null && prev.home != null && p.home > prev.home) {
+          if (homeDelta > 0 && awayDelta <= 0) {
             sideScored = "home";
-            if (!newFlash[key]) newFlash[key] = {};
-            newFlash[key].home = base + Math.random();
-          }
-          if (p.away != null && prev.away != null && p.away > prev.away) {
+          } else if (awayDelta > 0 && homeDelta <= 0) {
             sideScored = "away";
-            if (!newFlash[key]) newFlash[key] = {};
-            newFlash[key].away = base + Math.random();
+          } else if (homeDelta > 0 && awayDelta > 0) {
+            if (homeDelta > awayDelta) sideScored = "home";
+            else if (awayDelta > homeDelta) sideScored = "away";
+            else sideScored = null; // begge økte likt – ikke blink for å unngå "begge blinker"
           }
 
+          const prevServe = prevServeMap[key] || null;
           let currentServe = prevServe;
           let label = null;
 
           if (sideScored) {
+            // sett flash bare på laget som faktisk fikk poeng
+            if (sideScored === "home") {
+              newFlash[key] = { home: base + Math.random() };
+            } else if (sideScored === "away") {
+              newFlash[key] = { away: base + Math.random() };
+            }
+
             if (prevServe && prevServe.side === sideScored) {
               currentServe = { side: sideScored, hot: true };
               label = { side: sideScored, type: "break-point" };
@@ -1310,7 +1278,6 @@ function App() {
 
   return (
     <div className="wrap">
-      {/* Fokus-/filter-linje */}
       <div className="focusBar">
         <div className="badges" style={{ marginBottom: 4 }}>
           {FILTERS.map(f => {
