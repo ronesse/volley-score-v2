@@ -211,7 +211,7 @@ function eventKey(ev) {
 }
 
 /* ===========================
-   Gruppering via teams-tabellen
+   Grupplogikk (teams-tabellen)
    =========================== */
 /**
  *  - "mizuno"  : minst ett lag finnes i teams og har country === "Norge"
@@ -238,6 +238,60 @@ function classifyEventGroup(ev, teamsBySofaId) {
   if (hasNorwegian) return "mizuno";
   if (anyKnown) return "abroad";
   return "other";
+}
+
+/* ===========================
+   Tournament + season fra /live
+   =========================== */
+/**
+ * Henter turnering + season fra:
+ * - ev.tournament_name / ev.season_name
+ * - ev.tournament.name / ev.season.name
+ * - ev.tournament.season.name
+ * - ev.raw_json.* (SofaScore-strukturen)
+ */
+function getTournamentAndSeason(ev) {
+  let tournament = asStr(ev.tournament_name);
+  let season = asStr(ev.season_name);
+
+  // Direkte nested fra live
+  if (!tournament && ev.tournament?.name) {
+    tournament = asStr(ev.tournament.name);
+  }
+  if (!season && ev.season?.name) {
+    season = asStr(ev.season.name);
+  }
+
+  // tournament.season
+  if (!season && ev.tournament?.season?.name) {
+    season = asStr(ev.tournament.season.name);
+  }
+
+  // raw_json
+  if (ev.raw_json && (!tournament || !season)) {
+    try {
+      const raw = JSON.parse(ev.raw_json);
+
+      if (!tournament) {
+        tournament =
+          asStr(raw?.tournament?.name) ||
+          asStr(raw?.uniqueTournament?.name);
+      }
+
+      if (!season) {
+        season =
+          asStr(raw?.season?.name) ||
+          asStr(raw?.tournament?.season?.name);
+      }
+    } catch (e) {
+      // ignorer parse-feil
+    }
+  }
+
+  return {
+    tournament: tournament || "—",
+    season: season || null,
+  };
 }
 
 /* ===========================
@@ -354,7 +408,7 @@ const COUNTRY_ALIASES = {
   "mauritania": "MR",
   "cape verde": "CV", "cabo verde": "CV",
 
-  // Litt ekstra utenom forespørselen men nyttig
+  // bonus
   "usa": "US", "united states": "US",
   "canada": "CA",
   "japan": "JP", "japen": "JP",
@@ -477,7 +531,7 @@ function isoToFlag(iso) {
 /**
  * 1. Forsøk å finne land via teams.country
  * 2. Deretter via raw_json.tournament.category.country.name
- * 3. Til slutt via tekstmatch i tournament_name + season_name
+ * 3. Til slutt via tekstmatch i tournament/season
  */
 function deriveCountryLabel(ev, teamsBySofaId) {
   const home = teamsBySofaId.get(getHomeId(ev));
@@ -503,7 +557,8 @@ function deriveCountryLabel(ev, teamsBySofaId) {
 
   // 3) Tekst-søk i tournament/season
   if (!raw) {
-    raw = `${ev.tournament_name || ""} ${ev.season_name || ""}`;
+    const ts = getTournamentAndSeason(ev);
+    raw = `${ts.tournament || ""} ${ts.season || ""}`;
   }
 
   const text = asStr(raw).toLowerCase();
@@ -524,21 +579,72 @@ function deriveCountryLabel(ev, teamsBySofaId) {
 }
 
 /* ===========================
-   Liga-nivå
+   Liga-nivå + playoff/finals
    =========================== */
 /**
- * Forsøk å hente "liga/level" for kampen:
- * - først fra teams.league
- * - så ev.season_name
- * - til slutt ev.tournament_name (fallback)
+ * Liga/nivå: league fra teams, ellers season, ellers tournament.
  */
 function deriveLeagueLevel(ev, teamsBySofaId) {
+  const { season, tournament } = getTournamentAndSeason(ev);
+
   const home = teamsBySofaId.get(getHomeId(ev));
   const away = teamsBySofaId.get(getAwayId(ev));
-  const fromTeam = home?.league || away?.league || null;
-  const s = asStr(ev.season_name);
-  const t = asStr(ev.tournament_name);
-  return fromTeam || s || t || null;
+
+  return (
+    home?.league ||
+    away?.league ||
+    season ||
+    tournament ||
+    null
+  );
+}
+
+/**
+ * Stage/playoff/finals:
+ * - roundInfo.name (fra raw_json) => Kvartfinale, Semifinale, Finale, Sluttspill, etc.
+ */
+function deriveStageLabel(ev) {
+  let rawStage = null;
+
+  // Evt. direkte felt
+  if (ev.round_name) rawStage = asStr(ev.round_name);
+  if (!rawStage && ev.roundInfo?.name) rawStage = asStr(ev.roundInfo.name);
+
+  // Fra raw_json
+  if (!rawStage && ev.raw_json) {
+    try {
+      const j = JSON.parse(ev.raw_json);
+      rawStage = asStr(j?.roundInfo?.name);
+    } catch (e) {
+      // ignorér
+    }
+  }
+
+  if (!rawStage) return null;
+
+  const s = rawStage.toLowerCase();
+
+  if (s.includes("final") && !s.includes("semi") && !s.includes("quarter") && !s.includes("eighth")) {
+    return "Finale";
+  }
+  if (s.includes("semi")) {
+    return "Semifinale";
+  }
+  if (s.includes("quarter")) {
+    return "Kvartfinale";
+  }
+  if (s.includes("eighth")) {
+    return "Åttendedelsfinale";
+  }
+  if (s.includes("playoff") || s.includes("play-offs") || s.includes("play-offs")) {
+    return "Sluttspill";
+  }
+  if (s.includes("regular")) {
+    return "Seriespill";
+  }
+
+  // fallback: bruk originaltekst
+  return rawStage;
 }
 
 /* ===========================
@@ -618,6 +724,7 @@ function EventCard(props) {
     norPlayersAway = [],
     countryLabel,
     leagueLevel,
+    stageLabel,
   } = props;
 
   const label = liveLabel(ev.status_type);
@@ -648,11 +755,19 @@ function EventCard(props) {
     playText = "Side-out";
   }
 
-  const headerTournament = asStr(ev.tournament_name) || "—";
+  const { tournament, season } = getTournamentAndSeason(ev);
+
+  const headerNode = (
+    <>
+      {tournament}
+      {season && <span style={{ fontWeight: 500 }}> · {season}</span>}
+    </>
+  );
 
   const subParts = [];
   if (countryLabel) subParts.push(countryLabel);
   if (leagueLevel) subParts.push(leagueLevel);
+  if (stageLabel) subParts.push(stageLabel);
   if (ev.group_type) subParts.push(String(ev.group_type));
   const subText = subParts.join(" · ");
 
@@ -680,7 +795,7 @@ function EventCard(props) {
       <div className="cardHeader">
         <div>
           <div className="compTitle">
-            <span className="tournamentName">{headerTournament}</span>
+            <span className="tournamentName">{headerNode}</span>
           </div>
           {subText && <div className="sub">{subText}</div>}
         </div>
@@ -1237,6 +1352,7 @@ function App() {
 
           const countryLabel = deriveCountryLabel(ev, teamsBySofaId);
           const leagueLevel = deriveLeagueLevel(ev, teamsBySofaId);
+          const stageLabel = deriveStageLabel(ev);
 
           return (
             <EventCard
@@ -1251,6 +1367,7 @@ function App() {
               norPlayersAway={norPlayersAway}
               countryLabel={countryLabel}
               leagueLevel={leagueLevel}
+              stageLabel={stageLabel}
               onClick={() => {
                 if (id == null) {
                   setFocusedId(null);
