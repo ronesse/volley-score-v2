@@ -6,6 +6,7 @@ const POLL_MS = 5000;
 /* ===========================
    Generelle helpers
    =========================== */
+
 function safeArray(x) { return Array.isArray(x) ? x : []; }
 function asStr(v){ return (v == null) ? "" : String(v).trim(); }
 function nonEmpty(v){ const s = asStr(v); return s ? s : null; }
@@ -26,6 +27,7 @@ function initials(name){
 /* ===========================
    Status / LIVE
    =========================== */
+
 function liveLabel(statusType) {
   const t = String(statusType || "").toLowerCase();
   if (t.includes("inprogress") || t.includes("live") || t.includes("inplay")) return "LIVE";
@@ -239,6 +241,7 @@ function classifyEventGroup(ev, teamsBySofaId) {
 /* ===========================
    Tournament + season fra /live
    =========================== */
+
 function getTournamentAndSeason(ev) {
   let tournament = asStr(ev.tournament_name);
   let season = asStr(ev.season_name);
@@ -676,15 +679,12 @@ const PlayerAvatar = memo(function PlayerAvatar({ player }) {
 });
 
 /* ===========================
-   EventCard
+   EventCard – leser meta fra ev._liveMeta
    =========================== */
 
 function EventCard(props) {
   const {
     ev,
-    flashInfo,
-    serveInfo,
-    playLabelInfo,
     isFocused,
     onClick,
     isAbroadGroup,
@@ -695,13 +695,16 @@ function EventCard(props) {
     stageLabel,
   } = props;
 
-  const label = liveLabel(ev.status_type);
-  const p = currentPoints(ev);
+  const meta = ev._liveMeta || {};
+  const setNo = meta.setNo ?? currentPoints(ev).setNo;
+  const setsHome = ev.home_sets ?? 0;
+  const setsAway = ev.away_sets ?? 0;
+  const p = {
+    home: meta.points?.home ?? currentPoints(ev).home,
+    away: meta.points?.away ?? currentPoints(ev).away,
+  };
 
-  const setsHome = (ev.home_sets ?? 0);
-  const setsAway = (ev.away_sets ?? 0);
-
-  const currentSetText = p.setNo ? (String(p.setNo) + ". sett") : (ev.status_desc || "Pågår");
+  const currentSetText = setNo ? (String(setNo) + ". sett") : (ev.status_desc || "Pågår");
 
   const homeId = getHomeId(ev);
   const awayId = getAwayId(ev);
@@ -709,41 +712,21 @@ function EventCard(props) {
   const homeLogo = teamLogoUrl(homeId);
   const awayLogo = teamLogoUrl(awayId);
 
-  const isServingHome = serveInfo && serveInfo.side === "home";
-  const isServingAway = serveInfo && serveInfo.side === "away";
+  const label = liveLabel(ev.status_type);
 
-  // Hvilken side fikk poeng akkurat nå? (kun denne skal blinke)
-  const scoredSide =
-    flashInfo && flashInfo.home ? "home" :
-    (flashInfo && flashInfo.away ? "away" : null);
+  const serveSide = meta.serveSide || null;
+  const scoredSide = meta.sideScored || null; // laget som fikk poeng i siste rally
+  const playType = meta.playType || null;     // "break-point" | "side-out" | null
 
-  // Break-point (🔥) kun når:
-  // - vi har playLabelInfo.type === "break-point"
-  // - playLabelInfo.side matcher siden
-  // - det er denne siden som nettopp fikk poeng (scoredSide)
-  const breakHome =
-    playLabelInfo &&
-    playLabelInfo.type === "break-point" &&
-    playLabelInfo.side === "home" &&
-    scoredSide === "home";
+  const isServingHome = serveSide === "home";
+  const isServingAway = serveSide === "away";
 
-  const breakAway =
-    playLabelInfo &&
-    playLabelInfo.type === "break-point" &&
-    playLabelInfo.side === "away" &&
-    scoredSide === "away";
+  const breakHome = playType === "break-point" && scoredSide === "home";
+  const breakAway = playType === "break-point" && scoredSide === "away";
 
   const cls = "card" + (isFocused ? " focused" : "");
 
-  let playText = null;
-  if (playLabelInfo && playLabelInfo.type === "break-point") {
-    playText = "Break-point";
-  } else if (playLabelInfo && playLabelInfo.type === "side-out") {
-    playText = "Side-out";
-  }
-
   const { tournament, season } = getTournamentAndSeason(ev);
-
   const headerNode = (
     <>
       {tournament}
@@ -769,7 +752,7 @@ function EventCard(props) {
         label={i + ". sett"}
         home={h}
         away={a}
-        highlight={p.setNo === i}
+        highlight={setNo === i}
       />
     );
   }
@@ -824,9 +807,10 @@ function EventCard(props) {
 
         <div className="bigScore">
           <div className="pointsMain">
+            {/* Hjemmelag-poeng – blinker kun hvis scoredSide === "home" */}
             <span
-              key={"ph-" + (flashInfo.home || 0)}
-              className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
+              key={"ph-" + (scoredSide === "home" ? meta.flashToken : 0)}
+              className={"pointVal" + (scoredSide === "home" ? " blinkScore" : "")}
             >
               <span className="pointWrap home">
                 <span className="pointNumber">{p.home ?? "—"}</span>
@@ -842,9 +826,10 @@ function EventCard(props) {
 
             <span className="pointSep">-</span>
 
+            {/* Bortelag-poeng – blinker kun hvis scoredSide === "away" */}
             <span
-              key={"pa-" + (flashInfo.away || 0)}
-              className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
+              key={"pa-" + (scoredSide === "away" ? meta.flashToken : 0)}
+              className={"pointVal" + (scoredSide === "away" ? " blinkScore" : "")}
             >
               <span className="pointWrap away">
                 <span className="pointNumber">{p.away ?? "—"}</span>
@@ -861,24 +846,22 @@ function EventCard(props) {
 
           <div className="points">
             {setsHome} - {setsAway} i sett
-            {p.setNo ? (" · " + currentSetText) : ""}
+            {setNo ? (" · " + String(setNo) + ". sett") : ""}
           </div>
 
-          {isFocused && (isServingHome || isServingAway) && (
+          {isFocused && (isServingHome || isServingAway) && playType && (
             <div className="serveInfoRow">
               <div>
                 Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
               </div>
-              {playText && (
-                <div
-                  className={
-                    "playLabel " +
-                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
-                  }
-                >
-                  {playText}
-                </div>
-              )}
+              <div
+                className={
+                  "playLabel " +
+                  (playType === "break-point" ? "break-point" : "side-out")
+                }
+              >
+                {playType === "break-point" ? "Break-point" : "Side-out"}
+              </div>
             </div>
           )}
         </div>
@@ -936,9 +919,6 @@ function App() {
   const [error, setError] = useState("");
 
   const [filter, setFilter] = useState("other");
-  const [flash, setFlash] = useState({});
-  const [serve, setServe] = useState({});
-  const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);
 
   const [teams, setTeams] = useState([]);
@@ -946,11 +926,7 @@ function App() {
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
-  const serveRef = useRef({});
   const wakeLockRef = useRef(null);
-
-  // forrige poeng per kamp
-  const pointsRef = useRef(new Map());
 
   const fetchJson = useCallback(async (path, signal) => {
     const res = await fetch(API_BASE + path, {
@@ -1057,7 +1033,7 @@ function App() {
     return map;
   }, [players]);
 
-  /* ---- Hent live og scorer per kamp ---- */
+  /* ---- Hent live, bygg _liveMeta per event ---- */
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -1067,63 +1043,59 @@ function App() {
     try {
       setError("");
       const data = await fetchJson("/live", controller.signal);
-      const nextEvents = safeArray(data);
+      const nextRaw = safeArray(data);
 
-      const prevServeMap = serveRef.current || {};
-      const newServe = {};
-      const newPlayLabel = {};
-      const newFlash = {};
-      const now = Date.now();
-
-      const nextPointsMap = new Map(pointsRef.current);
-
-      for (let i = 0; i < nextEvents.length; i++) {
-        const ev = nextEvents[i];
-        const key = eventKey(ev);
-        const p = currentPoints(ev);
-
-        const prev = nextPointsMap.get(key) || { home: null, away: null };
-
-        let sideScored = null;
-        if (p.home != null && prev.home != null && p.home > prev.home) {
-          sideScored = "home";
-        }
-        if (p.away != null && prev.away != null && p.away > prev.away) {
-          sideScored = "away";
+      setEvents(prevEvents => {
+        const prevMap = new Map();
+        for (const ev of prevEvents) {
+          prevMap.set(eventKey(ev), ev);
         }
 
-        nextPointsMap.set(key, { home: p.home, away: p.away });
+        const timestamp = Date.now();
+        const next = nextRaw.map(raw => {
+          const key = eventKey(raw);
+          const prev = prevMap.get(key);
 
-        const prevServe = prevServeMap[key] || null;
-        let currentServe = prevServe;
-        let label = null;
+          const currPts = currentPoints(raw);
+          const prevPts = prev && prev._liveMeta
+            ? (prev._liveMeta.points || {})
+            : (prev ? currentPoints(prev) : {});
 
-        if (sideScored) {
-          newFlash[key] = {};
-          newFlash[key][sideScored] = now + Math.random();
-
-          if (prevServe && prevServe.side === sideScored) {
-            currentServe = { side: sideScored, hot: true };
-            label = { side: sideScored, type: "break-point" };
-          } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-            currentServe = { side: sideScored, hot: false };
-            label = { side: sideScored, type: "side-out" };
-          } else {
-            currentServe = { side: sideScored, hot: false };
+          let sideScored = null;
+          if (currPts.home != null && prevPts.home != null && currPts.home > prevPts.home) {
+            sideScored = "home";
           }
-        }
+          if (currPts.away != null && prevPts.away != null && currPts.away > prevPts.away) {
+            sideScored = "away";
+          }
 
-        newServe[key] = currentServe || null;
-        if (label) newPlayLabel[key] = label;
-      }
+          let serveSide = prev && prev._liveMeta ? prev._liveMeta.serveSide : null;
+          let playType = null;
 
-      pointsRef.current = nextPointsMap;
-      serveRef.current = newServe;
+          if (sideScored) {
+            if (serveSide && serveSide === sideScored) {
+              playType = "break-point";
+            } else if (serveSide && serveSide !== sideScored) {
+              playType = "side-out";
+            }
+            serveSide = sideScored;
+          }
 
-      setFlash(newFlash);
-      setServe(newServe);
-      setPlayLabel(newPlayLabel);
-      setEvents(nextEvents);
+          const meta = {
+            setNo: currPts.setNo,
+            points: { home: currPts.home, away: currPts.away },
+            serveSide,
+            sideScored,
+            playType,
+            flashToken: sideScored ? (timestamp + Math.random()) : null,
+          };
+
+          return { ...raw, _liveMeta: meta };
+        });
+
+        return next;
+      });
+
     } catch (e) {
       if (String(e && e.name) === "AbortError") return;
       setError(String((e && e.message) ? e.message : e));
@@ -1237,8 +1209,11 @@ function App() {
         null;
     }
 
-    const cp = focusedEvent ? currentPoints(focusedEvent) : null;
-    const hasActiveSet = !!(cp && cp.setNo != null);
+    const setNo = focusedEvent && focusedEvent._liveMeta
+      ? focusedEvent._liveMeta.setNo
+      : (focusedEvent ? currentPoints(focusedEvent).setNo : null);
+
+    const hasActiveSet = !!setNo;
 
     const shouldKeepAwake =
       !!focusedEvent &&
@@ -1332,11 +1307,7 @@ function App() {
       <div className="grid">
         {visible.map(ev => {
           const keyStr = eventKey(ev);
-          const flashInfo = flash[keyStr] || {};
-          const serveInfo = serve[keyStr] || {};
-          const playLabelInfo = playLabel[keyStr] || null;
           const isFocused = focusedId != null && eventId(ev) === focusedId;
-
           const id = eventId(ev);
 
           const group = classifyEventGroup(ev, teamsBySofaId);
@@ -1353,9 +1324,6 @@ function App() {
             <EventCard
               key={keyStr}
               ev={ev}
-              flashInfo={flashInfo}
-              serveInfo={serveInfo}
-              playLabelInfo={playLabelInfo}
               isFocused={isFocused}
               isAbroadGroup={isAbroadGroup}
               norPlayersHome={norPlayersHome}
