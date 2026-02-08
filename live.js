@@ -934,6 +934,9 @@ function App() {
   const serveRef = useRef({});
   const wakeLockRef = useRef(null);
 
+  // holder forrige poengstilling per kamp
+  const pointsRef = useRef(new Map());
+
   const fetchJson = useCallback(async (path, signal) => {
     const res = await fetch(API_BASE + path, {
       headers: { "Accept": "application/json" },
@@ -1039,7 +1042,7 @@ function App() {
     return map;
   }, [players]);
 
-  /* ---- Hent live og scoringslogikk ---- */
+  /* ---- Hent live og scorer per kamp ---- */
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -1049,69 +1052,64 @@ function App() {
     try {
       setError("");
       const data = await fetchJson("/live", controller.signal);
+      const nextEvents = safeArray(data);
 
+      const prevServeMap = serveRef.current || {};
       const newServe = {};
       const newPlayLabel = {};
+      const newFlash = {};
+      const now = Date.now();
 
-      setEvents(prevEvents => {
-        const prevPointsMap = new Map();
-        for (let i = 0; i < prevEvents.length; i++) {
-          const ev = prevEvents[i];
-          prevPointsMap.set(eventKey(ev), currentPoints(ev));
+      const nextPointsMap = new Map(pointsRef.current); // kopiere for oppdatering
+
+      for (let i = 0; i < nextEvents.length; i++) {
+        const ev = nextEvents[i];
+        const key = eventKey(ev);
+        const p = currentPoints(ev);
+
+        const prev = nextPointsMap.get(key) || { home: null, away: null };
+
+        let sideScored = null;
+        if (p.home != null && prev.home != null && p.home > prev.home) {
+          sideScored = "home";
+        }
+        if (p.away != null && prev.away != null && p.away > prev.away) {
+          // hvis begge økte, "vinner" away – fortsatt bare én side
+          sideScored = "away";
         }
 
-        const prevServeMap = serveRef.current || {};
-        const nextEvents = safeArray(data);
-        const newFlash = {};
-        const base = Date.now();
+        nextPointsMap.set(key, { home: p.home, away: p.away });
 
-        for (let i = 0; i < nextEvents.length; i++) {
-          const ev = nextEvents[i];
-          const key = eventKey(ev);
-          const p = currentPoints(ev);
-          const prev = prevPointsMap.get(key) || {};
-          const prevServe = prevServeMap[key] || null;
+        const prevServe = prevServeMap[key] || null;
+        let currentServe = prevServe;
+        let label = null;
 
-          let sideScored = null;
+        if (sideScored) {
+          newFlash[key] = {};
+          newFlash[key][sideScored] = now + Math.random();
 
-          if (p.home != null && prev.home != null && p.home > prev.home) {
-            sideScored = "home";
+          if (prevServe && prevServe.side === sideScored) {
+            currentServe = { side: sideScored, hot: true };
+            label = { side: sideScored, type: "break-point" };
+          } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
+            currentServe = { side: sideScored, hot: false };
+            label = { side: sideScored, type: "side-out" };
+          } else {
+            currentServe = { side: sideScored, hot: false };
           }
-          if (p.away != null && prev.away != null && p.away > prev.away) {
-            // hvis begge har økt, ender vi med "away" – men vi blinker fortsatt kun én side
-            sideScored = "away";
-          }
-
-          let currentServe = prevServe;
-          let label = null;
-
-          if (sideScored) {
-            // blink bare for laget som fikk poeng
-            newFlash[key] = {};
-            newFlash[key][sideScored] = base + Math.random();
-
-            if (prevServe && prevServe.side === sideScored) {
-              currentServe = { side: sideScored, hot: true };
-              label = { side: sideScored, type: "break-point" };
-            } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-              currentServe = { side: sideScored, hot: false };
-              label = { side: sideScored, type: "side-out" };
-            } else {
-              currentServe = { side: sideScored, hot: false };
-            }
-          }
-
-          newServe[key] = currentServe || null;
-          if (label) newPlayLabel[key] = label;
         }
 
-        setFlash(newFlash);
-        return nextEvents;
-      });
+        newServe[key] = currentServe || null;
+        if (label) newPlayLabel[key] = label;
+      }
 
+      pointsRef.current = nextPointsMap;
       serveRef.current = newServe;
+
+      setFlash(newFlash);
       setServe(newServe);
       setPlayLabel(newPlayLabel);
+      setEvents(nextEvents);
     } catch (e) {
       if (String(e && e.name) === "AbortError") return;
       setError(String((e && e.message) ? e.message : e));
