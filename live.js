@@ -711,12 +711,27 @@ function EventCard(props) {
 
   const isServingHome = serveInfo && serveInfo.side === "home";
   const isServingAway = serveInfo && serveInfo.side === "away";
-  const hotHome = isServingHome && serveInfo.hot;
-  const hotAway = isServingAway && serveInfo.hot;
 
+  // Hvilken side fikk poeng akkurat nå? (kun denne skal blinke)
   const scoredSide =
     flashInfo && flashInfo.home ? "home" :
     (flashInfo && flashInfo.away ? "away" : null);
+
+  // Break-point (🔥) kun når:
+  // - vi har playLabelInfo.type === "break-point"
+  // - playLabelInfo.side matcher siden
+  // - det er denne siden som nettopp fikk poeng (scoredSide)
+  const breakHome =
+    playLabelInfo &&
+    playLabelInfo.type === "break-point" &&
+    playLabelInfo.side === "home" &&
+    scoredSide === "home";
+
+  const breakAway =
+    playLabelInfo &&
+    playLabelInfo.type === "break-point" &&
+    playLabelInfo.side === "away" &&
+    scoredSide === "away";
 
   const cls = "card" + (isFocused ? " focused" : "");
 
@@ -818,7 +833,7 @@ function EventCard(props) {
                 {isServingHome && (
                   <ServeIcon
                     side="home"
-                    hot={hotHome}
+                    hot={breakHome}
                     highlight={scoredSide === "home"}
                   />
                 )}
@@ -836,7 +851,7 @@ function EventCard(props) {
                 {isServingAway && (
                   <ServeIcon
                     side="away"
-                    hot={hotAway}
+                    hot={breakAway}
                     highlight={scoredSide === "away"}
                   />
                 )}
@@ -934,7 +949,7 @@ function App() {
   const serveRef = useRef({});
   const wakeLockRef = useRef(null);
 
-  // holder forrige poengstilling per kamp
+  // forrige poeng per kamp
   const pointsRef = useRef(new Map());
 
   const fetchJson = useCallback(async (path, signal) => {
@@ -1060,7 +1075,7 @@ function App() {
       const newFlash = {};
       const now = Date.now();
 
-      const nextPointsMap = new Map(pointsRef.current); // kopiere for oppdatering
+      const nextPointsMap = new Map(pointsRef.current);
 
       for (let i = 0; i < nextEvents.length; i++) {
         const ev = nextEvents[i];
@@ -1074,7 +1089,6 @@ function App() {
           sideScored = "home";
         }
         if (p.away != null && prev.away != null && p.away > prev.away) {
-          // hvis begge økte, "vinner" away – fortsatt bare én side
           sideScored = "away";
         }
 
