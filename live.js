@@ -162,11 +162,12 @@ const SetBox = memo(function SetBox(props) {
    Serve-icon
    =========================== */
 
-function ServeIcon({ side, hot }) {
+function ServeIcon({ side, hot, highlight }) {
   const className =
     "serveIcon " +
     (side === "home" ? "home" : "away") +
-    (hot ? " hot" : "");
+    (hot ? " hot" : "") +
+    (highlight ? " blinkScore" : "");
 
   const isHome = side === "home";
 
@@ -243,13 +244,6 @@ function classifyEventGroup(ev, teamsBySofaId) {
 /* ===========================
    Tournament + season fra /live
    =========================== */
-/**
- * Henter turnering + season fra:
- * - ev.tournament_name / ev.season_name
- * - ev.tournament.name / ev.season.name
- * - ev.tournament.season.name
- * - ev.raw_json.* (SofaScore-strukturen)
- */
 function getTournamentAndSeason(ev) {
   let tournament = asStr(ev.tournament_name);
   let season = asStr(ev.season_name);
@@ -760,6 +754,11 @@ function EventCard(props) {
   const hotHome = isServingHome && serveInfo.hot;
   const hotAway = isServingAway && serveInfo.hot;
 
+  // Hvilken side scoret sist? (brukes til lampe + ball/flamme)
+  const scoredSide = flashInfo && flashInfo.home
+    ? "home"
+    : (flashInfo && flashInfo.away ? "away" : null);
+
   const cls = "card" + (isFocused ? " focused" : "");
 
   let playText = null;
@@ -815,7 +814,12 @@ function EventCard(props) {
         </div>
 
         <div className="status" title={ev.status_desc || ""}>
-          <span className={statusDot(ev.status_type)}></span>
+          <span
+            className={
+              statusDot(ev.status_type) +
+              (scoredSide ? " blinkScore" : "")
+            }
+          ></span>
           {label + (ev.status_desc ? " · " + String(ev.status_desc) : "")}
         </div>
       </div>
@@ -853,7 +857,13 @@ function EventCard(props) {
             >
               <span className="pointWrap home">
                 <span className="pointNumber">{p.home ?? "—"}</span>
-                {isServingHome && <ServeIcon side="home" hot={hotHome} />}
+                {isServingHome && (
+                  <ServeIcon
+                    side="home"
+                    hot={hotHome}
+                    highlight={scoredSide === "home"}
+                  />
+                )}
               </span>
             </span>
 
@@ -865,7 +875,13 @@ function EventCard(props) {
             >
               <span className="pointWrap away">
                 <span className="pointNumber">{p.away ?? "—"}</span>
-                {isServingAway && <ServeIcon side="away" hot={hotAway} />}
+                {isServingAway && (
+                  <ServeIcon
+                    side="away"
+                    hot={hotAway}
+                    highlight={scoredSide === "away"}
+                  />
+                )}
               </span>
             </span>
           </div>
