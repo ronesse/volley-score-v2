@@ -582,7 +582,9 @@ function deriveCountryLabel(ev, teamsBySofaId) {
    Liga-nivå + playoff/finals
    =========================== */
 /**
- * Liga/nivå: league fra teams, ellers season, ellers tournament.
+ * Liga/nivå: 
+ * - For Mizuno Norge: bruk kun season/tournament fra /live
+ * - For andre: bruk league fra teams hvis den er konsistent, ellers season/tournament
  */
 function deriveLeagueLevel(ev, teamsBySofaId) {
   const { season, tournament } = getTournamentAndSeason(ev);
@@ -590,13 +592,25 @@ function deriveLeagueLevel(ev, teamsBySofaId) {
   const home = teamsBySofaId.get(getHomeId(ev));
   const away = teamsBySofaId.get(getAwayId(ev));
 
-  return (
-    home?.league ||
-    away?.league ||
-    season ||
-    tournament ||
-    null
-  );
+  const homeLeague = asStr(home?.league);
+  const awayLeague = asStr(away?.league);
+
+  const group = classifyEventGroup(ev, teamsBySofaId);
+
+  // Mizuno: vis Eliteserien osv fra /live, ikke "Eredivisie 25/26" fra ToppVolley i teams-tabellen
+  if (group === "mizuno") {
+    return season || tournament || homeLeague || awayLeague || null;
+  }
+
+  // Utenlandske lag: league fra teams er ofte best (PlusLiga, Ligue A, osv.)
+  if (homeLeague && awayLeague && homeLeague === awayLeague) {
+    return homeLeague;
+  }
+  if (homeLeague && !awayLeague) return homeLeague;
+  if (awayLeague && !homeLeague) return awayLeague;
+
+  // fallback når league er utydelig
+  return season || tournament || homeLeague || awayLeague || null;
 }
 
 /**
@@ -636,7 +650,7 @@ function deriveStageLabel(ev) {
   if (s.includes("eighth")) {
     return "Åttendedelsfinale";
   }
-  if (s.includes("playoff") || s.includes("play-offs") || s.includes("play-offs")) {
+  if (s.includes("playoff") || s.includes("play-offs")) {
     return "Sluttspill";
   }
   if (s.includes("regular")) {
