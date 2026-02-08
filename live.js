@@ -714,7 +714,6 @@ function EventCard(props) {
   const hotHome = isServingHome && serveInfo.hot;
   const hotAway = isServingAway && serveInfo.hot;
 
-  // hvilken side scoret sist (basert på flashInfo)?
   const scoredSide =
     flashInfo && flashInfo.home ? "home" :
     (flashInfo && flashInfo.away ? "away" : null);
@@ -1071,38 +1070,25 @@ function App() {
           const key = eventKey(ev);
           const p = currentPoints(ev);
           const prev = prevPointsMap.get(key) || {};
-
-          const homeNow = (p.home != null) ? Number(p.home) : null;
-          const awayNow = (p.away != null) ? Number(p.away) : null;
-          const homePrev = (prev.home != null) ? Number(prev.home) : null;
-          const awayPrev = (prev.away != null) ? Number(prev.away) : null;
-
-          const homeDelta = (homeNow != null && homePrev != null) ? (homeNow - homePrev) : 0;
-          const awayDelta = (awayNow != null && awayPrev != null) ? (awayNow - awayPrev) : 0;
+          const prevServe = prevServeMap[key] || null;
 
           let sideScored = null;
 
-          if (homeDelta > 0 && awayDelta <= 0) {
+          if (p.home != null && prev.home != null && p.home > prev.home) {
             sideScored = "home";
-          } else if (awayDelta > 0 && homeDelta <= 0) {
+          }
+          if (p.away != null && prev.away != null && p.away > prev.away) {
+            // hvis begge har økt, ender vi med "away" – men vi blinker fortsatt kun én side
             sideScored = "away";
-          } else if (homeDelta > 0 && awayDelta > 0) {
-            if (homeDelta > awayDelta) sideScored = "home";
-            else if (awayDelta > homeDelta) sideScored = "away";
-            else sideScored = null; // begge økte likt – ikke blink for å unngå "begge blinker"
           }
 
-          const prevServe = prevServeMap[key] || null;
           let currentServe = prevServe;
           let label = null;
 
           if (sideScored) {
-            // sett flash bare på laget som faktisk fikk poeng
-            if (sideScored === "home") {
-              newFlash[key] = { home: base + Math.random() };
-            } else if (sideScored === "away") {
-              newFlash[key] = { away: base + Math.random() };
-            }
+            // blink bare for laget som fikk poeng
+            newFlash[key] = {};
+            newFlash[key][sideScored] = base + Math.random();
 
             if (prevServe && prevServe.side === sideScored) {
               currentServe = { side: sideScored, hot: true };
