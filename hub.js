@@ -225,7 +225,7 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
         </div>
       </div>
 
-      {/* Sett-bokser + resymé kun når kortet er i fokus */}
+      {/* Sett + Kampreferat kun når kortet er i fokus */}
       {isFocused && (
         <>
           <div className="setline">
@@ -240,10 +240,28 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
             })}
           </div>
 
-          <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.35, color: "#6b7280" }}>
-            {summaryText === "__loading__"
-              ? "Laster kampresymé…"
-              : (summaryText ? summaryText : "Ingen kampresymé tilgjengelig.")}
+          {/* Kampreferat-boks */}
+          <div
+            style={{
+              marginTop: 12,
+              border: "1px solid var(--border)",
+              background: "#fafafa",
+              borderRadius: 12,
+              padding: "10px 12px",
+              display: "grid",
+              gap: 6
+            }}
+          >
+            <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, fontWeight:900, color:"#111827" }}>
+              <span aria-hidden="true">📝</span>
+              <span>Kampreferat</span>
+            </div>
+
+            <div style={{ fontSize: 13, lineHeight: 1.35, color: "#374151" }}>
+              {summaryText === "__loading__"
+                ? "Laster kampreferat…"
+                : (summaryText ? summaryText : "Det finnes ikke kampreferat fra denne kampen")}
+            </div>
           </div>
         </>
       )}
@@ -292,8 +310,9 @@ function App(){
   // HUB-spesifikke filtre for lag (abroad / mizuno / all)
   const [teamFilter, setTeamFilter] = useState("all");
 
-  // NYTT: summary cache for event_id
-  const [summaryByEvent, setSummaryByEvent] = useState({}); // eventId -> string | "__loading__"
+  // Kampreferat cache
+  // eventId -> "__loading__" | "" (ingen) | "tekst..."
+  const [summaryByEvent, setSummaryByEvent] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -334,19 +353,34 @@ function App(){
   async function fetchJson(base, path, signal){
     const res = await fetch(base + path, { headers:{ "Accept":"application/json" }, signal, cache:"no-store" });
     if(!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
-    // Hvis backend mot formodning sender tekst/html (feilside), vil res.json() kaste.
     return res.json();
   }
 
-  // NYTT: Hent summary trygt (skal aldri knekke hele appen)
+  // Hent kampreferat trygt
   async function loadSummary(eventId){
     if (!eventId) return;
-    if (summaryByEvent[eventId] && summaryByEvent[eventId] !== "__loading__") return;
+
+    const existing = summaryByEvent[eventId];
+    if (existing && existing !== "__loading__") return;
 
     setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
+
     try{
-      const data = await fetchJson(API_BASE_EVENTS, `/events/${eventId}/summary`, new AbortController().signal);
-      setSummaryByEvent(prev => ({ ...prev, [eventId]: (data?.summary || "") }));
+      const res = await fetch(API_BASE_EVENTS + `/events/${eventId}/summary`, {
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
+      });
+
+      if (res.status === 404) {
+        setSummaryByEvent(prev => ({ ...prev, [eventId]: "" }));
+        return;
+      }
+      if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+
+      const data = await res.json();
+      const text = (data?.summary || "").trim();
+      setSummaryByEvent(prev => ({ ...prev, [eventId]: text }));
+
     } catch (e) {
       console.warn("Summary failed", eventId, e);
       setSummaryByEvent(prev => ({ ...prev, [eventId]: "" }));
@@ -371,7 +405,7 @@ function App(){
     setPlayers(playersArr.map(normalizePlayer).filter(p => p && p.id));
   }
 
-  // NYTT: robust mot del-feil (live/events)
+  // Robust: en feil i /live skal ikke knekke alt
   async function loadGlobalMatches(){
     const now = Math.floor(Date.now()/1000);
     const toNext = now + LOOKAHEAD_DAYS*24*3600;
@@ -399,7 +433,6 @@ function App(){
     setUpcoming(nextArr);
     setFinished(prevArr);
 
-    // Ikke sett global error bare fordi live feiler – men hvis alle tre feiler, vis error.
     const allFailed = (liveRes.status==="rejected" && nextRes.status==="rejected" && prevRes.status==="rejected");
     if (allFailed) setError("Kunne ikke hente live/evt data fra API.");
   }
@@ -449,7 +482,6 @@ function App(){
       setNextTeam(nextArr);
       setPrevTeam(prevArr);
       setFocusedEventKey(null);
-
     } catch(e){
       setError(String(e?.message ?? e));
       setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
