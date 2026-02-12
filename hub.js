@@ -449,10 +449,11 @@ function App(){
     try{
       const teamId = selectedTeam?.sofascoreTeamId;
       const qs = teamId != null ? `?sofa_team_id=${encodeURIComponent(teamId)}` : "";
-      const res = await fetch(API_BASE_EVENTS + `/events/${eventId}/summary${qs}`, {
-        headers: { "Accept": "application/json" },
-        cache: "no-store",
-      });
+const res = await fetch(
+  API_BASE_EVENTS + `/events/${eventId}/summary?team_id=${selectedTeam.id}`,
+  { headers:{ "Accept":"application/json" }, cache:"no-store" }
+);
+
 
       if (res.status === 404) {
         setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
