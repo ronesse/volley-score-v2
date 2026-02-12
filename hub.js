@@ -174,14 +174,7 @@ function eventKey(e){
 /* ===========================
    Match card (Hub)
    =========================== */
-/**
- * På hub:
- * - I listevisning: ingen sett-bokser, bare totalscore (Sett).
- * - Når et kort er "i fokus" (isFocused=true): vis sett-bokser og Tilbake-knapp.
- * - Ingen event.html – alt skjer lokalt.
- * - Fremtidige kamper uten score viser ".. - .." i stedet for "0 - 0".
- */
-function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
+function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
   const setsArr = safeArray(e.score?.sets);
@@ -193,9 +186,7 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
   const displayHomeSets = hasScore ? hs : "..";
   const displayAwaySets = hasScore ? as : "..";
 
-  const handleClick = () => {
-    onToggleFocus();
-  };
+  const handleClick = () => onToggleFocus();
 
   return (
     <div
@@ -234,19 +225,27 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus }){
         </div>
       </div>
 
-      {/* Sett-bokser kun når kortet er i fokus */}
+      {/* Sett-bokser + resymé kun når kortet er i fokus */}
       {isFocused && (
-        <div className="setline">
-          {[1,2,3,4,5].map(n => {
-            const s = setsArr.find(x => x.no === n);
-            return (
-              <div className="setbox" key={n}>
-                <div className="label">{n}</div>
-                <div className="val">{s?.home ?? "—"} - {s?.away ?? "—"}</div>
-              </div>
-            );
-          })}
-        </div>
+        <>
+          <div className="setline">
+            {[1,2,3,4,5].map(n => {
+              const s = setsArr.find(x => x.no === n);
+              return (
+                <div className="setbox" key={n}>
+                  <div className="label">{n}</div>
+                  <div className="val">{s?.home ?? "—"} - {s?.away ?? "—"}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.35, color: "#6b7280" }}>
+            {summaryText === "__loading__"
+              ? "Laster kampresymé…"
+              : (summaryText ? summaryText : "Ingen kampresymé tilgjengelig.")}
+          </div>
+        </>
       )}
 
       {/* Bunn-knapp: "Detaljert →" / "Tilbake" */}
@@ -293,6 +292,9 @@ function App(){
   // HUB-spesifikke filtre for lag (abroad / mizuno / all)
   const [teamFilter, setTeamFilter] = useState("all");
 
+  // NYTT: summary cache for event_id
+  const [summaryByEvent, setSummaryByEvent] = useState({}); // eventId -> string | "__loading__"
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -332,7 +334,23 @@ function App(){
   async function fetchJson(base, path, signal){
     const res = await fetch(base + path, { headers:{ "Accept":"application/json" }, signal, cache:"no-store" });
     if(!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+    // Hvis backend mot formodning sender tekst/html (feilside), vil res.json() kaste.
     return res.json();
+  }
+
+  // NYTT: Hent summary trygt (skal aldri knekke hele appen)
+  async function loadSummary(eventId){
+    if (!eventId) return;
+    if (summaryByEvent[eventId] && summaryByEvent[eventId] !== "__loading__") return;
+
+    setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
+    try{
+      const data = await fetchJson(API_BASE_EVENTS, `/events/${eventId}/summary`, new AbortController().signal);
+      setSummaryByEvent(prev => ({ ...prev, [eventId]: (data?.summary || "") }));
+    } catch (e) {
+      console.warn("Summary failed", eventId, e);
+      setSummaryByEvent(prev => ({ ...prev, [eventId]: "" }));
+    }
   }
 
   async function loadCore(){
@@ -353,16 +371,25 @@ function App(){
     setPlayers(playersArr.map(normalizePlayer).filter(p => p && p.id));
   }
 
+  // NYTT: robust mot del-feil (live/events)
   async function loadGlobalMatches(){
     const now = Math.floor(Date.now()/1000);
     const toNext = now + LOOKAHEAD_DAYS*24*3600;
     const fromPrev = now - LOOKBACK_DAYS*24*3600;
 
-    const [liveData, nextData, prevData] = await Promise.all([
+    const [liveRes, nextRes, prevRes] = await Promise.allSettled([
       fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
       fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
       fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
     ]);
+
+    const liveData = (liveRes.status === "fulfilled") ? liveRes.value : [];
+    const nextData = (nextRes.status === "fulfilled") ? nextRes.value : [];
+    const prevData = (prevRes.status === "fulfilled") ? prevRes.value : [];
+
+    if (liveRes.status === "rejected") console.warn("LIVE failed:", liveRes.reason);
+    if (nextRes.status === "rejected") console.warn("NEXT failed:", nextRes.reason);
+    if (prevRes.status === "rejected") console.warn("PREV failed:", prevRes.reason);
 
     const liveArr = safeArray(liveData).map(normalizeEvent);
     const nextArr = safeArray(nextData).map(normalizeEvent).filter(e => !isFinished(e.raw)).sort((a,b)=>(a.startTs??0)-(b.startTs??0));
@@ -371,6 +398,10 @@ function App(){
     setLive(liveArr);
     setUpcoming(nextArr);
     setFinished(prevArr);
+
+    // Ikke sett global error bare fordi live feiler – men hvis alle tre feiler, vis error.
+    const allFailed = (liveRes.status==="rejected" && nextRes.status==="rejected" && prevRes.status==="rejected");
+    if (allFailed) setError("Kunne ikke hente live/evt data fra API.");
   }
 
   async function loadTeamMatches(team){
@@ -386,11 +417,19 @@ function App(){
     const fromPrev = now - LOOKBACK_DAYS*24*3600;
 
     try{
-      const [liveData, nextData, prevData] = await Promise.all([
+      const [liveRes, nextRes, prevRes] = await Promise.allSettled([
         fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
         fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
         fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
       ]);
+
+      const liveData = (liveRes.status === "fulfilled") ? liveRes.value : [];
+      const nextData = (nextRes.status === "fulfilled") ? nextRes.value : [];
+      const prevData = (prevRes.status === "fulfilled") ? prevRes.value : [];
+
+      if (liveRes.status === "rejected") console.warn("LIVE(team) failed:", liveRes.reason);
+      if (nextRes.status === "rejected") console.warn("NEXT(team) failed:", nextRes.reason);
+      if (prevRes.status === "rejected") console.warn("PREV(team) failed:", prevRes.reason);
 
       const liveArr = safeArray(liveData)
         .map(normalizeEvent)
@@ -410,6 +449,7 @@ function App(){
       setNextTeam(nextArr);
       setPrevTeam(prevArr);
       setFocusedEventKey(null);
+
     } catch(e){
       setError(String(e?.message ?? e));
       setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
@@ -499,7 +539,6 @@ function App(){
   /* ===========
      Derived lists
      =========== */
-  // Lag: filtrer på groupType (abroad / mizuno / all) + søk
   const filteredTeams = useMemo(() => {
     let base = teams;
     if (teamFilter === "abroad") {
@@ -519,7 +558,6 @@ function App(){
     return base;
   }, [teams, teamFilter, qTeams]);
 
-  // Gruppér lag på liga
   const leagueGroups = useMemo(() => {
     const groups = new Map(); // leagueLabel -> [teams]
     for (const t of filteredTeams) {
@@ -536,7 +574,6 @@ function App(){
     return result;
   }, [filteredTeams]);
 
-  // Spillere – søk + alfabetisk
   const visiblePlayers = useMemo(() => {
     let base = players;
     const qq = qPlayers.trim().toLowerCase();
@@ -636,7 +673,6 @@ function App(){
           className="playerCardInner"
           style={{ display:"flex", flexWrap:"wrap", gap:12 }}
         >
-          {/* Bildekolonne – tar omtrent halvparten på større skjermer */}
           <div
             className="playerImageCol"
             style={{
@@ -668,7 +704,6 @@ function App(){
             </span>
           </div>
 
-          {/* Infokolonne – resten av kortet */}
           <div
             className="playerInfoCol"
             style={{
@@ -731,7 +766,6 @@ function App(){
      =========================== */
   return (
     <div className="wrap">
-      {/* Topp: tabs + søk – Spillere først */}
       <div className="nav" style={{ justifyContent:"space-between", alignItems:"center" }}>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
           <button
@@ -777,7 +811,6 @@ function App(){
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
-      {/* HUB-filtere for lag: Norske spillere ute / Norge Mizuno / Alle */}
       {tab === "teams" && !selectedTeam && (
         <div className="focusBar" style={{ marginTop: 4, marginBottom: 4 }}>
           <div className="badges" style={{ marginBottom: 4 }}>
@@ -818,7 +851,6 @@ function App(){
         </div>
       )}
 
-      {/* TEAMS LIST – gruppert på liga */}
       {tab === "teams" && !selectedTeam && (
         <div className="grid">
           {leagueGroups.map(group => (
@@ -841,10 +873,8 @@ function App(){
         </div>
       )}
 
-      {/* TEAM VIEW */}
       {tab === "teams" && selectedTeam && (
         <>
-          {/* Lag-header */}
           <div className="card">
             <div className="row">
               <div className="left">
@@ -875,7 +905,6 @@ function App(){
             </div>
           </div>
 
-          {/* Spillere for laget – norske først */}
           {selectedTeamPlayers.length > 0 && (
             <div className="grid">
               {selectedTeamPlayers
@@ -887,7 +916,6 @@ function App(){
             </div>
           )}
 
-          {/* Kamper – alle listet, sett-bokser kun på fokusert kamp */}
           <div className="grid">
             {liveTeam.map(e => {
               const k = eventKey(e);
@@ -897,7 +925,14 @@ function App(){
                   e={e}
                   statusLabel="LIVE"
                   isFocused={focusedEventKey === k}
-                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
                 />
               );
             })}
@@ -909,7 +944,14 @@ function App(){
                   e={e}
                   statusLabel="NEXT"
                   isFocused={focusedEventKey === k}
-                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
                 />
               );
             })}
@@ -921,7 +963,14 @@ function App(){
                   e={e}
                   statusLabel="FINISHED"
                   isFocused={focusedEventKey === k}
-                  onToggleFocus={() => setFocusedEventKey(prev => prev === k ? null : k)}
+                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
                 />
               );
             })}
@@ -929,7 +978,6 @@ function App(){
         </>
       )}
 
-      {/* PLAYERS TAB – spillere først */}
       {tab === "players" && (
         <div className="grid">
           {visiblePlayers.map(p => <PlayerCardLarge key={p.id} p={p} />)}
