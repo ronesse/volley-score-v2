@@ -172,19 +172,68 @@ function eventKey(e){
 }
 
 /* ===========================
+   News helpers (frontend)
+   =========================== */
+function nbDateTime(tsSeconds){
+  if(!tsSeconds) return "";
+  const d = new Date(tsSeconds * 1000);
+  return d.toLocaleString("nb-NO", {
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+function titleCaseSafe(s){
+  const x = asStr(s);
+  if (!x) return "";
+  return x.charAt(0).toUpperCase() + x.slice(1);
+}
+function buildHeadline(e){
+  // Ikke si vinner – bare “duell” / “thriller” etc.
+  const hs = e.score?.homeSets ?? 0;
+  const as = e.score?.awaySets ?? 0;
+  const hasScore = (hs !== 0 || as !== 0 || safeArray(e.score?.sets).length > 0);
+
+  const tag = (() => {
+    if (!hasScore) return "Kamp i vente";
+    if (hs === as && hs !== 0) return "Helt jevnt";
+    if (Math.abs(hs-as) >= 2) return "Kontrollert oppgjør";
+    if (Math.abs(hs-as) === 1 && (hs+as) >= 4) return "Femsett-thriller";
+    return "Tett batalje";
+  })();
+
+  return `${tag}: ${e.homeName} – ${e.awayName}`;
+}
+
+/* ===========================
    Match card (Hub)
    =========================== */
-function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
+function MatchCard({
+  e,
+  statusLabel,
+  isFocused,
+  onToggleFocus,
+  summaryObj, // { summary, image_url } | "__loading__" | null
+}){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
   const setsArr = safeArray(e.score?.sets);
   const tourLogo = tournamentLogoUrl(e.tournamentId);
 
-  // Hvis kampen åpenbart ikke har startet: vis ".. - .."
   const hasAnySetPoints = setsArr.length > 0;
   const hasScore = (hs !== 0 || as !== 0 || hasAnySetPoints);
   const displayHomeSets = hasScore ? hs : "..";
   const displayAwaySets = hasScore ? as : "..";
+
+  const headline = buildHeadline(e);
+  const whenTxt = nbDateTime(e.startTs);
+  const compTxt = compHeaderText(e);
+
+  const loading = summaryObj === "__loading__";
+  const summaryText = (!loading && summaryObj && typeof summaryObj === "object") ? asStr(summaryObj.summary) : "";
+  const imageUrl = (!loading && summaryObj && typeof summaryObj === "object") ? nonEmpty(summaryObj.image_url) : null;
 
   const handleClick = () => onToggleFocus();
 
@@ -198,9 +247,9 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
       style={{ cursor:"pointer" }}
     >
       <div className="matchHeader">
-        <div className="compTitle" title={compHeaderText(e)}>
+        <div className="compTitle" title={compTxt}>
           <MiniLogo src={tourLogo} />
-          <span style={{ minWidth:0 }}>{compHeaderText(e)}</span>
+          <span style={{ minWidth:0 }}>{compTxt}</span>
         </div>
         <span className="badge">
           <span className="dot gray"></span>
@@ -225,7 +274,7 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
         </div>
       </div>
 
-      {/* Sett + Kampreferat kun når kortet er i fokus */}
+      {/* Fokus: sett + NYHETSSAK */}
       {isFocused && (
         <>
           <div className="setline">
@@ -240,33 +289,72 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
             })}
           </div>
 
-          {/* Kampreferat-boks */}
           <div
             style={{
               marginTop: 12,
               border: "1px solid var(--border)",
-              background: "#fafafa",
-              borderRadius: 12,
-              padding: "10px 12px",
-              display: "grid",
-              gap: 6
+              background: "var(--card)",
+              borderRadius: 16,
+              overflow: "hidden",
             }}
           >
-            <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, fontWeight:900, color:"#111827" }}>
-              <span aria-hidden="true">📝</span>
-              <span>Kampreferat</span>
-            </div>
+            {/* Bilde */}
+            {imageUrl ? (
+              <div style={{ width:"100%", height: 220, background:"#e5e7eb", borderBottom:"1px solid var(--border)" }}>
+                <img
+                  src={API_BASE_EVENTS + imageUrl}
+                  alt=""
+                  loading="lazy"
+                  style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  width:"100%",
+                  height: 120,
+                  background:"#f3f4f6",
+                  borderBottom:"1px solid var(--border)",
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  fontWeight:900,
+                  color:"#6b7280",
+                  letterSpacing:"0.02em"
+                }}
+              >
+                {titleCaseSafe(statusLabel)} · {whenTxt || "—"}
+              </div>
+            )}
 
-            <div style={{ fontSize: 13, lineHeight: 1.35, color: "#374151" }}>
-              {summaryText === "__loading__"
-                ? "Laster kampreferat…"
-                : (summaryText ? summaryText : "Det finnes ikke kampreferat fra denne kampen")}
+            {/* Tekst */}
+            <div style={{ padding: "12px 14px", display:"grid", gap:8 }}>
+              <div style={{ fontSize: 18, fontWeight: 950, lineHeight: 1.15 }}>
+                {headline}
+              </div>
+
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", color:"var(--muted)", fontSize:12 }}>
+                <span style={{ display:"inline-flex", gap:6, alignItems:"center" }}>
+                  <span aria-hidden="true">🕒</span>
+                  <span>{whenTxt || "Tid ukjent"}</span>
+                </span>
+                <span>•</span>
+                <span style={{ display:"inline-flex", gap:6, alignItems:"center" }}>
+                  <span aria-hidden="true">🏟️</span>
+                  <span>{compTxt}</span>
+                </span>
+              </div>
+
+              <div style={{ fontSize: 13.5, lineHeight: 1.42, color:"#374151" }}>
+                {loading
+                  ? "Laster kampreferat…"
+                  : (summaryText ? summaryText : "Det finnes ikke kampreferat fra denne kampen")}
+              </div>
             </div>
           </div>
         </>
       )}
 
-      {/* Bunn-knapp: "Detaljert →" / "Tilbake" */}
       <div style={{ marginTop: 10, fontSize:12, fontWeight:700, display:"flex", justifyContent:"flex-end" }}>
         <button
           type="button"
@@ -285,7 +373,6 @@ function MatchCard({ e, statusLabel, isFocused, onToggleFocus, summaryText }){
    App
    =========================== */
 function App(){
-  // Spillere først, deretter lag
   const [tab, setTab] = useState("players"); // "players" | "teams"
   const [qTeams, setQTeams] = useState("");
   const [qPlayers, setQPlayers] = useState("");
@@ -294,24 +381,18 @@ function App(){
   const [players, setPlayers] = useState([]);
   const [selectedTeam, setSelectedTeam] = useState(null);
 
-  // global matches (for meta)
   const [live, setLive] = useState([]);
   const [upcoming, setUpcoming] = useState([]);
   const [finished, setFinished] = useState([]);
 
-  // team view matches
   const [liveTeam, setLiveTeam] = useState([]);
   const [nextTeam, setNextTeam] = useState([]);
   const [prevTeam, setPrevTeam] = useState([]);
 
-  // fokus på enkeltkamp (hub)
   const [focusedEventKey, setFocusedEventKey] = useState(null);
-
-  // HUB-spesifikke filtre for lag (abroad / mizuno / all)
   const [teamFilter, setTeamFilter] = useState("all");
 
-  // Kampreferat cache
-  // eventId -> "__loading__" | "" (ingen) | "tekst..."
+  // eventId -> "__loading__" | { summary, image_url } | { summary:"", image_url:null }
   const [summaryByEvent, setSummaryByEvent] = useState({});
 
   const [loading, setLoading] = useState(true);
@@ -356,7 +437,7 @@ function App(){
     return res.json();
   }
 
-  // Hent kampreferat trygt
+  // 🔥 NYTT: last summary med sofa_team_id (laget du følger)
   async function loadSummary(eventId){
     if (!eventId) return;
 
@@ -366,24 +447,30 @@ function App(){
     setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
 
     try{
-      const res = await fetch(API_BASE_EVENTS + `/events/${eventId}/summary`, {
+      const teamId = selectedTeam?.sofascoreTeamId;
+      const qs = teamId != null ? `?sofa_team_id=${encodeURIComponent(teamId)}` : "";
+      const res = await fetch(API_BASE_EVENTS + `/events/${eventId}/summary${qs}`, {
         headers: { "Accept": "application/json" },
         cache: "no-store",
       });
 
       if (res.status === 404) {
-        setSummaryByEvent(prev => ({ ...prev, [eventId]: "" }));
+        setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
         return;
       }
       if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
 
       const data = await res.json();
-      const text = (data?.summary || "").trim();
-      setSummaryByEvent(prev => ({ ...prev, [eventId]: text }));
-
+      setSummaryByEvent(prev => ({
+        ...prev,
+        [eventId]: {
+          summary: asStr(data?.summary),
+          image_url: nonEmpty(data?.image_url),
+        }
+      }));
     } catch (e) {
       console.warn("Summary failed", eventId, e);
-      setSummaryByEvent(prev => ({ ...prev, [eventId]: "" }));
+      setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
     }
   }
 
@@ -405,7 +492,6 @@ function App(){
     setPlayers(playersArr.map(normalizePlayer).filter(p => p && p.id));
   }
 
-  // Robust: en feil i /live skal ikke knekke alt
   async function loadGlobalMatches(){
     const now = Math.floor(Date.now()/1000);
     const toNext = now + LOOKAHEAD_DAYS*24*3600;
@@ -521,6 +607,9 @@ function App(){
   useEffect(() => {
     if (!selectedTeam) return;
     loadTeamMatches(selectedTeam);
+    // når du bytter lag, kan du godt tømme gamle summaries
+    setSummaryByEvent({});
+    setFocusedEventKey(null);
   }, [selectedTeam]);
 
   /* ===========
@@ -528,7 +617,7 @@ function App(){
      =========== */
   const teamEventMeta = useMemo(() => {
     const allEvents = [...live, ...upcoming, ...finished];
-    const agg = new Map(); // sofaId -> { tournaments: Map(name->count), seasons: Map(name->count) }
+    const agg = new Map();
 
     for (const e of allEvents) {
       const ids = [e.homeId, e.awayId];
@@ -591,7 +680,7 @@ function App(){
   }, [teams, teamFilter, qTeams]);
 
   const leagueGroups = useMemo(() => {
-    const groups = new Map(); // leagueLabel -> [teams]
+    const groups = new Map();
     for (const t of filteredTeams) {
       const key = t.league || "Uten liga";
       if (!groups.has(key)) groups.set(key, []);
@@ -701,10 +790,7 @@ function App(){
         style={{ cursor: playerTeam ? "pointer" : "default" }}
         onClick={handleClick}
       >
-        <div
-          className="playerCardInner"
-          style={{ display:"flex", flexWrap:"wrap", gap:12 }}
-        >
+        <div className="playerCardInner" style={{ display:"flex", flexWrap:"wrap", gap:12 }}>
           <div
             className="playerImageCol"
             style={{
@@ -772,10 +858,7 @@ function App(){
               )}
             </div>
 
-            <div
-              className="meta"
-              style={{ marginTop:"auto", justifyContent:"flex-start" }}
-            >
+            <div className="meta" style={{ marginTop:"auto", justifyContent:"flex-start" }}>
               {p.externalUrl && (
                 <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">
                   Volleybox →
@@ -843,6 +926,7 @@ function App(){
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
+      {/* HUB-filtere */}
       {tab === "teams" && !selectedTeam && (
         <div className="focusBar" style={{ marginTop: 4, marginBottom: 4 }}>
           <div className="badges" style={{ marginBottom: 4 }}>
@@ -883,6 +967,7 @@ function App(){
         </div>
       )}
 
+      {/* TEAMS LIST */}
       {tab === "teams" && !selectedTeam && (
         <div className="grid">
           {leagueGroups.map(group => (
@@ -905,6 +990,7 @@ function App(){
         </div>
       )}
 
+      {/* TEAM VIEW */}
       {tab === "teams" && selectedTeam && (
         <>
           <div className="card">
@@ -937,6 +1023,7 @@ function App(){
             </div>
           </div>
 
+          {/* Spillere */}
           {selectedTeamPlayers.length > 0 && (
             <div className="grid">
               {selectedTeamPlayers
@@ -948,6 +1035,7 @@ function App(){
             </div>
           )}
 
+          {/* Kamper */}
           <div className="grid">
             {liveTeam.map(e => {
               const k = eventKey(e);
@@ -957,7 +1045,7 @@ function App(){
                   e={e}
                   statusLabel="LIVE"
                   isFocused={focusedEventKey === k}
-                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
                   onToggleFocus={() => {
                     setFocusedEventKey(prev => {
                       const next = (prev === k) ? null : k;
@@ -976,7 +1064,7 @@ function App(){
                   e={e}
                   statusLabel="NEXT"
                   isFocused={focusedEventKey === k}
-                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
                   onToggleFocus={() => {
                     setFocusedEventKey(prev => {
                       const next = (prev === k) ? null : k;
@@ -995,7 +1083,7 @@ function App(){
                   e={e}
                   statusLabel="FINISHED"
                   isFocused={focusedEventKey === k}
-                  summaryText={e.eventId ? summaryByEvent[e.eventId] : ""}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
                   onToggleFocus={() => {
                     setFocusedEventKey(prev => {
                       const next = (prev === k) ? null : k;
@@ -1010,6 +1098,7 @@ function App(){
         </>
       )}
 
+      {/* PLAYERS TAB */}
       {tab === "players" && (
         <div className="grid">
           {visiblePlayers.map(p => <PlayerCardLarge key={p.id} p={p} />)}
