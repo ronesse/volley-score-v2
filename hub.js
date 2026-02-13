@@ -231,9 +231,20 @@ function MatchCard({
   const whenTxt = nbDateTime(e.startTs);
   const compTxt = compHeaderText(e);
 
-  const loading = summaryObj === "__loading__";
-  const summaryText = (!loading && summaryObj && typeof summaryObj === "object") ? asStr(summaryObj.summary) : "";
-  const imageUrl = (!loading && summaryObj && typeof summaryObj === "object") ? nonEmpty(summaryObj.image_url) : null;
+const obj = (summaryObj && typeof summaryObj === "object") ? summaryObj : null;
+
+// støtt både gammel ("__loading__") og ny ({summary:"__loading__"})
+const loading = (summaryObj === "__loading__") || (obj?.summary === "__loading__");
+
+// alltid les tekst/bilde fra objekt hvis det finnes
+const summaryText = (!loading && obj) ? asStr(obj.summary) : "";
+const imageUrlRaw = (!loading && obj) ? nonEmpty(obj.image_url) : null;
+
+// bygg riktig bilde-URL (støtter både "/img/..." og "https://...")
+const imageUrl = imageUrlRaw
+  ? (imageUrlRaw.startsWith("http") ? imageUrlRaw : (API_BASE_EVENTS + imageUrlRaw))
+  : null;
+
 
   const handleClick = () => onToggleFocus();
 
@@ -302,7 +313,7 @@ function MatchCard({
             {imageUrl ? (
               <div style={{ width:"100%", height: 220, background:"#e5e7eb", borderBottom:"1px solid var(--border)" }}>
                 <img
-                  src={API_BASE_EVENTS + imageUrl}
+                  src={imageUrl}
                   alt=""
                   loading="lazy"
                   style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
@@ -437,46 +448,57 @@ function App(){
     return res.json();
   }
 
-// 🔥 NYTT: last summary med team_id (laget du følger i UI)
+// ✅ NY: summary-cache som objekt (ikke string)
 async function loadSummary(eventId){
   if (!eventId) return;
 
   const existing = summaryByEvent[eventId];
-  if (existing && existing !== "__loading__") return;
+  if (existing && existing.status === "done") return;   // allerede lastet
+  if (existing && existing.status === "loading") return; // allerede i gang
 
-  setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
+  setSummaryByEvent(prev => ({
+    ...prev,
+    [eventId]: { status:"loading", summary:"", image_url:null, has_rally:false }
+  }));
 
   try{
-    // Vi vil alltid sende team_id når vi står på en valgt lag-side,
-    // slik at API'et kan velge serve-bilde for "laget du følger"
-    const teamId = selectedTeam?.id ? encodeURIComponent(selectedTeam.id) : null;
-    const url = API_BASE_EVENTS + `/events/${eventId}/summary` + (teamId ? `?team_id=${teamId}` : "");
+    // Viktig: team_id er ID fra /teams (DB), ikke sofascoreTeamId
+    const teamId = selectedTeam?.id;
+    const qs = teamId != null ? `?team_id=${encodeURIComponent(teamId)}` : "";
 
-    const res = await fetch(url, {
-      headers: { "Accept":"application/json" },
-      cache: "no-store",
-    });
+    const res = await fetch(
+      API_BASE_EVENTS + `/events/${eventId}/summary${qs}`,
+      { headers:{ "Accept":"application/json" }, cache:"no-store" }
+    );
 
     if (res.status === 404) {
-      setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
+      setSummaryByEvent(prev => ({
+        ...prev,
+        [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+      }));
       return;
     }
     if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
 
     const data = await res.json();
+
     setSummaryByEvent(prev => ({
       ...prev,
       [eventId]: {
+        status: "done",
         summary: asStr(data?.summary),
         image_url: nonEmpty(data?.image_url),
+        has_rally: !!data?.has_rally
       }
     }));
   } catch (e) {
     console.warn("Summary failed", eventId, e);
-    setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
+    setSummaryByEvent(prev => ({
+      ...prev,
+      [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+    }));
   }
 }
-
 
   async function loadCore(){
     if (abortRef.current) abortRef.current.abort();
