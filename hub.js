@@ -437,43 +437,46 @@ function App(){
     return res.json();
   }
 
-  // 🔥 NYTT: last summary med sofa_team_id (laget du følger)
-  async function loadSummary(eventId){
-    if (!eventId) return;
+// 🔥 NYTT: last summary med team_id (laget du følger i UI)
+async function loadSummary(eventId){
+  if (!eventId) return;
 
-    const existing = summaryByEvent[eventId];
-    if (existing && existing !== "__loading__") return;
+  const existing = summaryByEvent[eventId];
+  if (existing && existing !== "__loading__") return;
 
-    setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
+  setSummaryByEvent(prev => ({ ...prev, [eventId]: "__loading__" }));
 
-    try{
-      const teamId = selectedTeam?.sofascoreTeamId;
-      const qs = teamId != null ? `?sofa_team_id=${encodeURIComponent(teamId)}` : "";
-const res = await fetch(
-  API_BASE_EVENTS + `/events/${eventId}/summary?team_id=${selectedTeam.id}`,
-  { headers:{ "Accept":"application/json" }, cache:"no-store" }
-);
+  try{
+    // Vi vil alltid sende team_id når vi står på en valgt lag-side,
+    // slik at API'et kan velge serve-bilde for "laget du følger"
+    const teamId = selectedTeam?.id ? encodeURIComponent(selectedTeam.id) : null;
+    const url = API_BASE_EVENTS + `/events/${eventId}/summary` + (teamId ? `?team_id=${teamId}` : "");
 
+    const res = await fetch(url, {
+      headers: { "Accept":"application/json" },
+      cache: "no-store",
+    });
 
-      if (res.status === 404) {
-        setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
-        return;
-      }
-      if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
-
-      const data = await res.json();
-      setSummaryByEvent(prev => ({
-        ...prev,
-        [eventId]: {
-          summary: asStr(data?.summary),
-          image_url: nonEmpty(data?.image_url),
-        }
-      }));
-    } catch (e) {
-      console.warn("Summary failed", eventId, e);
+    if (res.status === 404) {
       setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
+      return;
     }
+    if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+
+    const data = await res.json();
+    setSummaryByEvent(prev => ({
+      ...prev,
+      [eventId]: {
+        summary: asStr(data?.summary),
+        image_url: nonEmpty(data?.image_url),
+      }
+    }));
+  } catch (e) {
+    console.warn("Summary failed", eventId, e);
+    setSummaryByEvent(prev => ({ ...prev, [eventId]: { summary:"", image_url:null } }));
   }
+}
+
 
   async function loadCore(){
     if (abortRef.current) abortRef.current.abort();
