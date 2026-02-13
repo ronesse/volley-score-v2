@@ -463,13 +463,13 @@ async function loadSummary(eventId){
 
   try{
     // Viktig: team_id er ID fra /teams (DB), ikke sofascoreTeamId
-    const teamId = selectedTeam?.id;
-    const qs = teamId != null ? `?team_id=${encodeURIComponent(teamId)}` : "";
+   const sofaId = selectedTeam?.sofascoreTeamId;
+   const qs = (sofaId != null) ? `?sofa_team_id=${encodeURIComponent(sofaId)}` : "";
+   const res = await fetch(
+     API_BASE_EVENTS + `/events/${eventId}/summary${qs}`,
+     { headers:{ "Accept":"application/json" }, cache:"no-store" }
+   );
 
-    const res = await fetch(
-      API_BASE_EVENTS + `/events/${eventId}/summary${qs}`,
-      { headers:{ "Accept":"application/json" }, cache:"no-store" }
-    );
 
     if (res.status === 404) {
       setSummaryByEvent(prev => ({
