@@ -11,7 +11,7 @@ const API_BASE_EVENTS  = "https://volleyball.ronesse.no";
    Settings
    =========================== */
 const POLL_MS = 15000;
-const CORE_REFRESH_MS = 10 * 60 * 1000; // 10 minutter (teams/players sjeldnere)
+const CORE_REFRESH_MS = 10 * 60 * 1000; // 10 minutter
 const LOOKAHEAD_DAYS = 14;
 const LOOKBACK_DAYS = 30;
 
@@ -126,11 +126,7 @@ function extractScore(raw){
     if (hp != null || ap != null) sets.push({ no:i, home: hp, away: ap });
   }
 
-  return {
-    homeSets: (homeSets == null ? 0 : homeSets),
-    awaySets: (awaySets == null ? 0 : awaySets),
-    sets
-  };
+  return { homeSets: (homeSets == null ? 0 : homeSets), awaySets: (awaySets == null ? 0 : awaySets), sets };
 }
 function isFinished(raw){
   const t = String(
@@ -148,16 +144,12 @@ function isFinished(raw){
   return false;
 }
 
-/**
- * normalizeEvent:
- * - Mange API'er kan sende home_team_id / away_team_id som enten:
- *   (A) sofascore team id (typisk store tall)
- *   (B) din DB team.id (små tall / strings)
- * Denne funksjonen mapper DB-team-id -> sofascoreTeamId via sofaTeamIdByDbTeamId.
- */
 function normalizeEvent(raw, sofaTeamIdByDbTeamId){
   const startTs = raw.start_ts ?? raw.startTimestamp ?? null;
 
+  // raw home/away id kan være:
+  // - sofascore team id (number)
+  // - DB team id (string/int)
   const rawHome = raw.home_team_id ?? raw.homeTeam?.id ?? null;
   const rawAway = raw.away_team_id ?? raw.awayTeam?.id ?? null;
 
@@ -169,7 +161,7 @@ function normalizeEvent(raw, sofaTeamIdByDbTeamId){
     // Ser ut som SofaScore-id (typisk store tall)
     if (Number.isFinite(n) && n > 1000) return n;
 
-    // Hvis x matcher DB-team-id i /teams -> map til sofascoreTeamId
+    // Hvis x matcher en DB-team-id i /teams, map til sofascoreTeamId
     const key = String(x);
     if (sofaTeamIdByDbTeamId && typeof sofaTeamIdByDbTeamId.get === "function") {
       if (sofaTeamIdByDbTeamId.has(key)) return sofaTeamIdByDbTeamId.get(key);
@@ -183,14 +175,20 @@ function normalizeEvent(raw, sofaTeamIdByDbTeamId){
     raw,
     startTs,
     eventId: raw.event_id ?? raw.id ?? null,
+
+    // Nå blir disse sofascoreTeamId (hvis vi kan)
     homeId: toSofaId(rawHome),
     awayId: toSofaId(rawAway),
+
     homeName: raw.home_team_name ?? raw.homeTeam?.name ?? "Home",
     awayName: raw.away_team_name ?? raw.awayTeam?.name ?? "Away",
+
+    // tournamentId beholdes som DB tournament_id (som matcher filnavn)
     tournamentId: raw.tournament_id ?? raw.tournament?.id ?? null,
     tournamentName: raw.tournament_name ?? raw.tournament?.name ?? "",
     seasonName: raw.season_name ?? raw.season?.name ?? "",
     groupType: normalizeGroupType(raw.group_type ?? raw.groupType ?? null),
+
     score: extractScore(raw),
   };
 }
@@ -251,7 +249,7 @@ function MatchCard({
   statusLabel,
   isFocused,
   onToggleFocus,
-  summaryObj, // { status, summary, image_url } | "__loading__" | null
+  summaryObj, // { summary, image_url } | "__loading__" | null
 }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
@@ -263,4 +261,938 @@ function MatchCard({
   const displayHomeSets = hasScore ? hs : "..";
   const displayAwaySets = hasScore ? as : "..";
 
-  const headline = build
+  const headline = buildHeadline(e);
+  const whenTxt = nbDateTime(e.startTs);
+  const compTxt = compHeaderText(e);
+
+  const obj = (summaryObj && typeof summaryObj === "object") ? summaryObj : null;
+
+  // støtt både gammel ("__loading__") og ny ({status:"loading"})
+  const loading = (summaryObj === "__loading__") || (obj?.status === "loading") || (obj?.summary === "__loading__");
+
+  // alltid les tekst/bilde fra objekt hvis det finnes
+  const summaryText = (!loading && obj) ? asStr(obj.summary) : "";
+  const imageUrlRaw = (!loading && obj) ? nonEmpty(obj.image_url) : null;
+
+  // bygg riktig bilde-URL (støtter både "/img/..." og "https://...")
+  const imageUrl = imageUrlRaw
+    ? (imageUrlRaw.startsWith("http") ? imageUrlRaw : (API_BASE_EVENTS + imageUrlRaw))
+    : null;
+
+  const handleClick = () => onToggleFocus();
+
+  return (
+    <div
+      className={"card matchCard" + (isFocused ? " focused" : "")}
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={(ev)=>{ if(ev.key==="Enter" || ev.key===" ") handleClick(); }}
+      style={{ cursor:"pointer" }}
+    >
+      <div className="matchHeader">
+        <div className="compTitle" title={compTxt}>
+          <MiniLogo src={tourLogo} />
+          <span style={{ minWidth:0 }}>{compTxt}</span>
+        </div>
+        <span className="badge">
+          <span className="dot gray"></span>
+          {statusLabel} · {formatTs(e.startTs)}
+        </span>
+      </div>
+
+      <div className="scoreRow">
+        <div className="team">
+          <MiniLogo src={teamLogoUrl(e.homeId)} />
+          <span className="teamName">{e.homeName}</span>
+        </div>
+
+        <div className="bigScore">
+          <div className="sets">{displayHomeSets} - {displayAwaySets}</div>
+          <div className="points">Sett</div>
+        </div>
+
+        <div className="team right">
+          <MiniLogo src={teamLogoUrl(e.awayId)} />
+          <span className="teamName">{e.awayName}</span>
+        </div>
+      </div>
+
+      {/* Fokus: sett + NYHETSSAK */}
+      {isFocused && (
+        <>
+          <div className="setline">
+            {[1,2,3,4,5].map(n => {
+              const s = setsArr.find(x => x.no === n);
+              return (
+                <div className="setbox" key={n}>
+                  <div className="label">{n}</div>
+                  <div className="val">{s?.home ?? "—"} - {s?.away ?? "—"}</div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              marginTop: 12,
+              border: "1px solid var(--border)",
+              background: "var(--card)",
+              borderRadius: 16,
+              overflow: "hidden",
+            }}
+          >
+            {/* Bilde */}
+            {imageUrl ? (
+              <div style={{ width:"100%", height: 220, background:"#e5e7eb", borderBottom:"1px solid var(--border)" }}>
+                <img
+                  src={imageUrl}
+                  alt=""
+                  loading="lazy"
+                  style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  width:"100%",
+                  height: 120,
+                  background:"#f3f4f6",
+                  borderBottom:"1px solid var(--border)",
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  fontWeight:900,
+                  color:"#6b7280",
+                  letterSpacing:"0.02em"
+                }}
+              >
+                {titleCaseSafe(statusLabel)} · {whenTxt || "—"}
+              </div>
+            )}
+
+            {/* Tekst */}
+            <div style={{ padding: "12px 14px", display:"grid", gap:8 }}>
+              <div style={{ fontSize: 18, fontWeight: 950, lineHeight: 1.15 }}>
+                {headline}
+              </div>
+
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", color:"var(--muted)", fontSize:12 }}>
+                <span style={{ display:"inline-flex", gap:6, alignItems:"center" }}>
+                  <span aria-hidden="true">🕒</span>
+                  <span>{whenTxt || "Tid ukjent"}</span>
+                </span>
+                <span>•</span>
+                <span style={{ display:"inline-flex", gap:6, alignItems:"center" }}>
+                  <span aria-hidden="true">🏟️</span>
+                  <span>{compTxt}</span>
+                </span>
+              </div>
+
+              <div style={{ fontSize: 13.5, lineHeight: 1.42, color:"#374151" }}>
+                {loading
+                  ? "Laster kampreferat…"
+                  : (summaryText ? summaryText : "Det finnes ikke kampreferat fra denne kampen")}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ marginTop: 10, fontSize:12, fontWeight:700, display:"flex", justifyContent:"flex-end" }}>
+        <button
+          type="button"
+          className="btn"
+          style={{ padding:"4px 8px", fontSize:11 }}
+          onClick={(ev) => { ev.stopPropagation(); onToggleFocus(); }}
+        >
+          {isFocused ? "Tilbake" : "Detaljert →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ===========================
+   App
+   =========================== */
+function App(){
+  const [tab, setTab] = useState("players"); // "players" | "teams"
+  const [qTeams, setQTeams] = useState("");
+  const [qPlayers, setQPlayers] = useState("");
+
+  const [teams, setTeams] = useState([]);
+  const [players, setPlayers] = useState([]);
+
+  // Map: DB team.id (string) -> sofascoreTeamId (number)
+  const sofaTeamIdByDbTeamId = useMemo(() => {
+    const m = new Map();
+    for (const t of teams) {
+      if (!t || !t.id) continue;
+      if (t.sofascoreTeamId == null) continue;
+      m.set(String(t.id), t.sofascoreTeamId);
+    }
+    return m;
+  }, [teams]);
+
+  // Map: sofascoreTeamId (number) -> team object
+  const teamBySofaId = useMemo(() => {
+    const m = new Map();
+    for (const t of teams) {
+      if (!t || t.sofascoreTeamId == null) continue;
+      m.set(Number(t.sofascoreTeamId), t);
+    }
+    return m;
+  }, [teams]);
+
+  const [selectedTeam, setSelectedTeam] = useState(null);
+
+  const [live, setLive] = useState([]);
+  const [upcoming, setUpcoming] = useState([]);
+  const [finished, setFinished] = useState([]);
+
+  const [liveTeam, setLiveTeam] = useState([]);
+  const [nextTeam, setNextTeam] = useState([]);
+  const [prevTeam, setPrevTeam] = useState([]);
+
+  const [focusedEventKey, setFocusedEventKey] = useState(null);
+  const [teamFilter, setTeamFilter] = useState("all");
+
+  // eventId -> "__loading__" | { summary, image_url } | { status:"loading", ... } | { status:"done", ... }
+  const [summaryByEvent, setSummaryByEvent] = useState({});
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const pollRef = useRef(null);
+  const abortRef = useRef(null);
+
+  function normalizeTeam(t){
+    return {
+      id: nonEmpty(t.id) ?? (t.id === 0 ? "0" : null),
+      name: asStr(t.name) || "—",
+      country: nonEmpty(t.country),
+      league: nonEmpty(t.league),
+      groupType: normalizeGroupType(t.group_type),
+      sofascoreTeamId: asNum(t.sofascore_team_id),
+      tournamentId: nonEmpty(t.tournament_id),
+      widgetName: nonEmpty(t.widget_name),
+      homepageUrl: nonEmpty(t.homepage_url),
+      streamUrl: nonEmpty(t.stream_url),
+    };
+  }
+  function normalizePlayer(p){
+    return {
+      id: nonEmpty(p.id),
+      name: asStr(p.name) || "—",
+      position: nonEmpty(p.position),
+      jersey: nonEmpty(p.jersey_number),
+      nationality: nonEmpty(p.nationality),
+      externalUrl: nonEmpty(p.external_url),
+      instagram: nonEmpty(p.instagram),
+      heightCm: nonEmpty(p.height_cm),
+      birthYear: nonEmpty(p.birth_year),
+      teamId: nonEmpty(p.team_id),
+      sofascoreTeamId: asNum(p.sofascore_team_id),
+    };
+  }
+
+  async function fetchJson(base, path, signal){
+    const res = await fetch(base + path, { headers:{ "Accept":"application/json" }, signal, cache:"no-store" });
+    if(!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+    return res.json();
+  }
+
+  // ✅ NY: summary-cache som objekt (ikke string)
+  async function loadSummary(eventId){
+    if (!eventId) return;
+
+    const existing = summaryByEvent[eventId];
+    if (existing && existing.status === "done") return;   // allerede lastet
+    if (existing && existing.status === "loading") return; // allerede i gang
+
+    setSummaryByEvent(prev => ({
+      ...prev,
+      [eventId]: { status:"loading", summary:"", image_url:null, has_rally:false }
+    }));
+
+    try{
+      // Viktig: team_id er ID fra /teams (DB), ikke sofascoreTeamId
+      const sofaId = selectedTeam?.sofascoreTeamId;
+      const qs = (sofaId != null) ? `?sofa_team_id=${encodeURIComponent(sofaId)}` : "";
+      const res = await fetch(
+        API_BASE_EVENTS + `/events/${eventId}/summary${qs}`,
+        { headers:{ "Accept":"application/json" }, cache:"no-store" }
+      );
+
+      if (res.status === 404) {
+        setSummaryByEvent(prev => ({
+          ...prev,
+          [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+        }));
+        return;
+      }
+      if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
+
+      const data = await res.json();
+
+      setSummaryByEvent(prev => ({
+        ...prev,
+        [eventId]: {
+          status: "done",
+          summary: asStr(data?.summary),
+          image_url: nonEmpty(data?.image_url),
+          has_rally: !!data?.has_rally
+        }
+      }));
+    } catch (e) {
+      console.warn("Summary failed", eventId, e);
+      setSummaryByEvent(prev => ({
+        ...prev,
+        [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+      }));
+    }
+  }
+
+  async function loadCore(){
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError("");
+
+    const [teamsData, playersData] = await Promise.all([
+      fetchJson(API_BASE_TEAMS, "/teams?limit=1000&offset=0", controller.signal),
+      fetchJson(API_BASE_PLAYERS, "/players?limit=1000&offset=0", controller.signal),
+    ]);
+
+    const teamsArr = Array.isArray(teamsData) ? teamsData : safeArray(teamsData?.items);
+    const playersArr = Array.isArray(playersData) ? playersData : safeArray(playersData?.items);
+
+    setTeams(teamsArr.map(normalizeTeam).filter(t => t && t.id));
+    setPlayers(playersArr.map(normalizePlayer).filter(p => p && p.id));
+  }
+
+  async function loadGlobalMatches(){
+    const now = Math.floor(Date.now()/1000);
+    const toNext = now + LOOKAHEAD_DAYS*24*3600;
+    const fromPrev = now - LOOKBACK_DAYS*24*3600;
+
+    const [liveRes, nextRes, prevRes] = await Promise.allSettled([
+      fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
+      fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
+    ]);
+
+    const liveData = (liveRes.status === "fulfilled") ? liveRes.value : [];
+    const nextData = (nextRes.status === "fulfilled") ? nextRes.value : [];
+    const prevData = (prevRes.status === "fulfilled") ? prevRes.value : [];
+
+    if (liveRes.status === "rejected") console.warn("LIVE failed:", liveRes.reason);
+    if (nextRes.status === "rejected") console.warn("NEXT failed:", nextRes.reason);
+    if (prevRes.status === "rejected") console.warn("PREV failed:", prevRes.reason);
+
+    const liveArr = safeArray(liveData).map(r => normalizeEvent(r, sofaTeamIdByDbTeamId));
+    const nextArr = safeArray(nextData).map(r => normalizeEvent(r, sofaTeamIdByDbTeamId)).filter(e => !isFinished(e.raw)).sort((a,b)=>(a.startTs??0)-(b.startTs??0));
+    const prevArr = safeArray(prevData).map(r => normalizeEvent(r, sofaTeamIdByDbTeamId)).filter(e => isFinished(e.raw)).sort((a,b)=>(b.startTs??0)-(a.startTs??0));
+
+    setLive(liveArr);
+    setUpcoming(nextArr);
+    setFinished(prevArr);
+
+    const allFailed = (liveRes.status==="rejected" && nextRes.status==="rejected" && prevRes.status==="rejected");
+    if (allFailed) setError("Kunne ikke hente live/evt data fra API.");
+  }
+
+  async function loadTeamMatches(team){
+    if (!team || team.sofascoreTeamId == null) {
+      setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
+      setFocusedEventKey(null);
+      return;
+    }
+    const teamSofa = Number(team.sofascoreTeamId);
+
+    const now = Math.floor(Date.now()/1000);
+    const toNext = now + LOOKAHEAD_DAYS*24*3600;
+    const fromPrev = now - LOOKBACK_DAYS*24*3600;
+
+    try{
+      const [liveRes, nextRes, prevRes] = await Promise.allSettled([
+        fetchJson(API_BASE_EVENTS, "/live", new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, `/events?from_ts=${now}&to_ts=${toNext}&limit=1000&offset=0`, new AbortController().signal),
+        fetchJson(API_BASE_EVENTS, `/events?from_ts=${fromPrev}&to_ts=${now}&limit=1000&offset=0`, new AbortController().signal),
+      ]);
+
+      const liveData = (liveRes.status === "fulfilled") ? liveRes.value : [];
+      const nextData = (nextRes.status === "fulfilled") ? nextRes.value : [];
+      const prevData = (prevRes.status === "fulfilled") ? prevRes.value : [];
+
+      if (liveRes.status === "rejected") console.warn("LIVE(team) failed:", liveRes.reason);
+      if (nextRes.status === "rejected") console.warn("NEXT(team) failed:", nextRes.reason);
+      if (prevRes.status === "rejected") console.warn("PREV(team) failed:", prevRes.reason);
+
+      const liveArr = safeArray(liveData)
+        .map(r => normalizeEvent(r, sofaTeamIdByDbTeamId))
+        .filter(e => e.homeId===teamSofa || e.awayId===teamSofa);
+
+      const nextArr = safeArray(nextData)
+        .map(r => normalizeEvent(r, sofaTeamIdByDbTeamId))
+        .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && !isFinished(e.raw))
+        .sort((a,b)=>(a.startTs??0)-(b.startTs??0));
+
+      const prevArr = safeArray(prevData)
+        .map(r => normalizeEvent(r, sofaTeamIdByDbTeamId))
+        .filter(e => (e.homeId===teamSofa || e.awayId===teamSofa) && isFinished(e.raw))
+        .sort((a,b)=>(b.startTs??0)-(a.startTs??0));
+
+      setLiveTeam(liveArr);
+      setNextTeam(nextArr);
+      setPrevTeam(prevArr);
+      setFocusedEventKey(null);
+    } catch(e){
+      setError(String(e?.message ?? e));
+      setLiveTeam([]); setNextTeam([]); setPrevTeam([]);
+      setFocusedEventKey(null);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try{
+        await loadCore();
+        let lastCoreAt = Date.now();
+        await loadGlobalMatches();
+        if (cancelled) return;
+
+        pollRef.current = setInterval(async () => {
+          const nowMs = Date.now();
+
+          if (nowMs - lastCoreAt > CORE_REFRESH_MS) {
+            await loadCore();
+            lastCoreAt = nowMs;
+          }
+
+          await loadGlobalMatches();
+          if (selectedTeam) {
+            await loadTeamMatches(selectedTeam);
+          }
+        }, POLL_MS);
+      } catch(e){
+        setError(String(e?.message ?? e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (abortRef.current) abortRef.current.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedTeam) return;
+    loadTeamMatches(selectedTeam);
+    // når du bytter lag, kan du godt tømme gamle summaries
+    setSummaryByEvent({});
+    setFocusedEventKey(null);
+  }, [selectedTeam]);
+
+  /* ===========
+     Build "best" tournament/season per team (based on events)
+     =========== */
+  const teamEventMeta = useMemo(() => {
+    const allEvents = [...live, ...upcoming, ...finished];
+    const agg = new Map();
+
+    for (const e of allEvents) {
+      const ids = [e.homeId, e.awayId];
+      for (const id of ids) {
+        if (id == null) continue;
+
+        let entry = agg.get(id);
+        if (!entry) {
+          entry = { tournaments: new Map(), seasons: new Map() };
+          agg.set(id, entry);
+        }
+
+        const tName = asStr(e.tournamentName);
+        const sName = asStr(e.seasonName);
+
+        if (tName) entry.tournaments.set(tName, (entry.tournaments.get(tName) || 0) + 1);
+        if (sName) entry.seasons.set(sName, (entry.seasons.get(sName) || 0) + 1);
+      }
+    }
+
+    const pickTop = (m) => {
+      let bestName = null;
+      let bestCount = -1;
+      for (const [name, count] of m.entries()) {
+        if (count > bestCount) { bestCount = count; bestName = name; }
+      }
+      return bestName;
+    };
+
+    const out = new Map();
+    for (const [id, entry] of agg.entries()) {
+      out.set(id, {
+        tournamentName: pickTop(entry.tournaments),
+        seasonName: pickTop(entry.seasons),
+      });
+    }
+    return out;
+  }, [live, upcoming, finished]);
+
+  /* ===========
+     Derived lists
+     =========== */
+  const filteredTeams = useMemo(() => {
+    let base = teams;
+    if (teamFilter === "abroad") {
+      base = base.filter(t => t.groupType === "abroad");
+    } else if (teamFilter === "mizuno") {
+      base = base.filter(t => t.groupType === "mizuno");
+    }
+    const qq = qTeams.trim().toLowerCase();
+    if (qq){
+      base = base.filter(t =>
+        t.name.toLowerCase().includes(qq) ||
+        String(t.country||"").toLowerCase().includes(qq) ||
+        String(t.league||"").toLowerCase().includes(qq) ||
+        String(t.widgetName||"").toLowerCase().includes(qq)
+      );
+    }
+    return base;
+  }, [teams, teamFilter, qTeams]);
+
+  const leagueGroups = useMemo(() => {
+    const groups = new Map();
+    for (const t of filteredTeams) {
+      const key = t.league || "Uten liga";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    }
+    const result = [];
+    for (const [league, arr] of groups.entries()) {
+      arr.sort((a,b)=>a.name.localeCompare(b.name, "nb"));
+      result.push({ league, teams: arr });
+    }
+    result.sort((a,b)=>a.league.localeCompare(b.league, "nb"));
+    return result;
+  }, [filteredTeams]);
+
+  const visiblePlayers = useMemo(() => {
+    let base = players;
+    const qq = qPlayers.trim().toLowerCase();
+    if (qq){
+      base = base.filter(p =>
+        p.name.toLowerCase().includes(qq) ||
+        String(p.nationality||"").toLowerCase().includes(qq) ||
+        String(p.teamId||"").toLowerCase().includes(qq)
+      );
+    }
+    return [...base].sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+  }, [players, qPlayers]);
+
+  const selectedTeamPlayers = useMemo(() => {
+    if (!selectedTeam || !selectedTeam.id) return [];
+    return players.filter(p => p.teamId === selectedTeam.id).sort((a,b)=>a.name.localeCompare(b.name,"nb"));
+  }, [players, selectedTeam]);
+
+  const selectedMeta = useMemo(() => {
+    if (!selectedTeam || selectedTeam.sofascoreTeamId == null) return null;
+    return teamEventMeta.get(selectedTeam.sofascoreTeamId) || null;
+  }, [selectedTeam, teamEventMeta]);
+
+  /* ===========================
+     UI subcomponents
+     =========================== */
+  function TeamCard({ t }){
+    const meta = (t.sofascoreTeamId != null) ? teamEventMeta.get(t.sofascoreTeamId) : null;
+
+    const line2 = [
+      meta?.tournamentName,
+      meta?.seasonName,
+      t.league,
+      t.country,
+      t.widgetName ? ("Widget: " + t.widgetName) : null,
+    ].filter(Boolean).join(" · ");
+
+    return (
+      <div
+        className="card"
+        onClick={() => {
+          setSelectedTeam(t);
+          setTab("teams");
+          setFocusedEventKey(null);
+        }}
+        style={{ cursor:"pointer" }}
+      >
+        <div className="row">
+          <div className="left">
+            <LogoBox src={teamLogoUrl(t.sofascoreTeamId)} label={initials(t.name)} />
+            <div className="nameBlock">
+              <div className="name">{t.name}</div>
+              <div className="sub">{line2 || "—"}</div>
+            </div>
+          </div>
+          <div className="meta">
+            {t.groupType && <span className="pill">{t.groupType}</span>}
+            {t.sofascoreTeamId != null && <span className="pill">SofaTeam: {t.sofascoreTeamId}</span>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function PlayerCardLarge({ p }){
+    const photo = playerPhotoUrl(p.id);
+    const status = useImageStatus(photo);
+    const ig = nonEmpty(p.instagram);
+    const igHandle = ig ? (ig.startsWith("@") ? ig.slice(1) : ig) : null;
+    const igUrl = igHandle ? ("https://instagram.com/" + igHandle) : null;
+
+    const line2 = [
+      p.position,
+      p.jersey ? ("#" + p.jersey) : null,
+      p.nationality,
+      p.heightCm ? (p.heightCm + " cm") : null,
+      p.birthYear ? ("Født " + p.birthYear) : null
+    ].filter(Boolean).join(" · ");
+
+    const playerTeam = p.teamId ? teams.find(t => t.id === p.teamId) : null;
+
+    const handleClick = () => {
+      if (playerTeam) {
+        setSelectedTeam(playerTeam);
+        setTab("teams");
+        setFocusedEventKey(null);
+      }
+    };
+
+    return (
+      <div
+        className="card playerCard"
+        style={{ cursor: playerTeam ? "pointer" : "default" }}
+        onClick={handleClick}
+      >
+        <div className="playerCardInner" style={{ display:"flex", flexWrap:"wrap", gap:12 }}>
+          <div
+            className="playerImageCol"
+            style={{
+              flex:"1 1 280px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              alignItems:"stretch"
+            }}
+          >
+            <span
+              className="logoBox playerPhotoBox"
+              aria-hidden="true"
+              style={{
+                width:"100%",
+                height:"100%",
+                maxHeight:240,
+                borderRadius:16,
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                fontWeight:900,
+                fontSize:18,
+              }}
+            >
+              {(!photo || status !== "ok")
+                ? <span>{initials(p.name)}</span>
+                : <img src={photo} alt="" loading="lazy" style={{ width:"100%", height:"100%", objectFit:"cover" }} />}
+            </span>
+          </div>
+
+          <div
+            className="playerInfoCol"
+            style={{
+              flex:"1 1 260px",
+              minWidth:200,
+              maxWidth:"50%",
+              display:"flex",
+              flexDirection:"column",
+              gap:8,
+              minHeight: "100%"
+            }}
+          >
+            <div className="nameBlock">
+              <div className="name">{p.name}</div>
+              <div className="sub">{line2 || "—"}</div>
+
+              {playerTeam && (
+                <div
+                  className="sub playerTeamLine"
+                  style={{
+                    display:"flex",
+                    alignItems:"center",
+                    gap:6,
+                    flexWrap:"wrap",
+                    marginTop:4
+                  }}
+                >
+                  <MiniLogo src={teamLogoUrl(playerTeam.sofascoreTeamId)} />
+                  <span>
+                    {playerTeam.name}
+                    {playerTeam.league ? (" · " + playerTeam.league) : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className="meta" style={{ marginTop:"auto", justifyContent:"flex-start" }}>
+              {p.externalUrl && (
+                <a className="btn" href={p.externalUrl} target="_blank" rel="noreferrer">
+                  Volleybox →
+                </a>
+              )}
+              {igUrl && (
+                <a className="btn" href={igUrl} target="_blank" rel="noreferrer">
+                  Instagram →
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ===========================
+     Render
+     =========================== */
+  return (
+    <div className="wrap">
+      <div className="nav" style={{ justifyContent:"space-between", alignItems:"center" }}>
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+          <button
+            className={"btn " + (tab==="players" ? "primary" : "")}
+            onClick={() => { setTab("players"); setSelectedTeam(null); setFocusedEventKey(null); }}
+          >
+            Spillere
+          </button>
+          <button
+            className={"btn " + (tab==="teams" ? "primary" : "")}
+            onClick={() => { setTab("teams"); setSelectedTeam(null); setFocusedEventKey(null); }}
+          >
+            Lag
+          </button>
+
+          {selectedTeam && tab==="teams" && (
+            <button className="btn" onClick={() => { setSelectedTeam(null); setFocusedEventKey(null); }}>
+              ← Tilbake
+            </button>
+          )}
+        </div>
+
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          {tab === "teams" && (
+            <input
+              value={qTeams}
+              onChange={(e)=>setQTeams(e.target.value)}
+              placeholder="Søk lag eller liga…"
+              style={{ minWidth:200 }}
+            />
+          )}
+          {tab === "players" && (
+            <input
+              value={qPlayers}
+              onChange={(e)=>setQPlayers(e.target.value)}
+              placeholder="Søk spiller…"
+              style={{ minWidth:200 }}
+            />
+          )}
+        </div>
+      </div>
+
+      {error && <div className="alert">Feil: {error}</div>}
+      {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
+
+      {/* HUB-filtere */}
+      {tab === "teams" && !selectedTeam && (
+        <div className="focusBar" style={{ marginTop: 4, marginBottom: 4 }}>
+          <div className="badges" style={{ marginBottom: 4 }}>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="abroad" ? "#111827" : "#fafafa",
+                color:      teamFilter==="abroad" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="abroad" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("abroad")}
+            >
+              Norske spillere ute
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="mizuno" ? "#111827" : "#fafafa",
+                color:      teamFilter==="mizuno" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="mizuno" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("mizuno")}
+            >
+              Norge Mizuno
+            </button>
+            <button
+              className="badge filterBtn"
+              style={{
+                background: teamFilter==="all" ? "#111827" : "#fafafa",
+                color:      teamFilter==="all" ? "#ffffff" : "#111827",
+                borderColor:teamFilter==="all" ? "#111827" : "var(--border)",
+              }}
+              onClick={() => setTeamFilter("all")}
+            >
+              Alle
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TEAMS LIST */}
+      {tab === "teams" && !selectedTeam && (
+        <div className="grid">
+          {leagueGroups.map(group => (
+            <div key={group.league}>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 800,
+                  color: "#6b7280",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  margin: "8px 4px 4px",
+                }}
+              >
+                {group.league}
+              </div>
+              {group.teams.map(t => <TeamCard key={t.id} t={t} />)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* TEAM VIEW */}
+      {tab === "teams" && selectedTeam && (
+        <>
+          <div className="card">
+            <div className="row">
+              <div className="left">
+                <LogoBox src={teamLogoUrl(selectedTeam.sofascoreTeamId)} label={initials(selectedTeam.name)} />
+                <div className="nameBlock">
+                  <div className="name">{selectedTeam.name}</div>
+                  <div className="sub">
+                    {[
+                      selectedMeta?.tournamentName,
+                      selectedMeta?.seasonName,
+                      selectedTeam.league,
+                      selectedTeam.country,
+                      selectedTeam.widgetName
+                    ].filter(Boolean).join(" · ") || "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="meta">
+                {selectedTeam.groupType && <span className="pill">{selectedTeam.groupType}</span>}
+                {selectedTeam.sofascoreTeamId != null && <span className="pill">SofaTeam: {selectedTeam.sofascoreTeamId}</span>}
+                {selectedTeam.homepageUrl && (
+                  <a className="btn" href={selectedTeam.homepageUrl} target="_blank" rel="noreferrer">Nettside →</a>
+                )}
+                {selectedTeam.streamUrl && (
+                  <a className="btn" href={selectedTeam.streamUrl} target="_blank" rel="noreferrer">Stream →</a>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Spillere */}
+          {selectedTeamPlayers.length > 0 && (
+            <div className="grid">
+              {selectedTeamPlayers
+                .filter(p => asStr(p.nationality).toLowerCase().includes("nor"))
+                .map(p => <PlayerCardLarge key={p.id} p={p} />)}
+              {selectedTeamPlayers
+                .filter(p => !asStr(p.nationality).toLowerCase().includes("nor"))
+                .map(p => <PlayerCardLarge key={p.id} p={p} />)}
+            </div>
+          )}
+
+          {/* Kamper */}
+          <div className="grid">
+            {liveTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="LIVE"
+                  isFocused={focusedEventKey === k}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
+            {nextTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="NEXT"
+                  isFocused={focusedEventKey === k}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
+            {prevTeam.map(e => {
+              const k = eventKey(e);
+              return (
+                <MatchCard
+                  key={k}
+                  e={e}
+                  statusLabel="FINISHED"
+                  isFocused={focusedEventKey === k}
+                  summaryObj={e.eventId ? (summaryByEvent[e.eventId] ?? null) : null}
+                  onToggleFocus={() => {
+                    setFocusedEventKey(prev => {
+                      const next = (prev === k) ? null : k;
+                      if (next && e.eventId) loadSummary(e.eventId);
+                      return next;
+                    });
+                  }}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* PLAYERS TAB */}
+      {tab === "players" && (
+        <div className="grid">
+          {visiblePlayers.map(p => <PlayerCardLarge key={p.id} p={p} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("hub-root")).render(<App />);
