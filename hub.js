@@ -147,9 +147,6 @@ function isFinished(raw){
 function normalizeEvent(raw, sofaTeamIdByDbTeamId){
   const startTs = raw.start_ts ?? raw.startTimestamp ?? null;
 
-  // raw home/away id kan være:
-  // - sofascore team id (number)
-  // - DB team id (string/int)
   const rawHome = raw.home_team_id ?? raw.homeTeam?.id ?? null;
   const rawAway = raw.away_team_id ?? raw.awayTeam?.id ?? null;
 
@@ -161,13 +158,11 @@ function normalizeEvent(raw, sofaTeamIdByDbTeamId){
     // Ser ut som SofaScore-id (typisk store tall)
     if (Number.isFinite(n) && n > 1000) return n;
 
-    // Hvis x matcher en DB-team-id i /teams, map til sofascoreTeamId
     const key = String(x);
     if (sofaTeamIdByDbTeamId && typeof sofaTeamIdByDbTeamId.get === "function") {
       if (sofaTeamIdByDbTeamId.has(key)) return sofaTeamIdByDbTeamId.get(key);
     }
 
-    // fallback: bruk tallet hvis mulig
     return Number.isFinite(n) ? n : null;
   }
 
@@ -176,14 +171,12 @@ function normalizeEvent(raw, sofaTeamIdByDbTeamId){
     startTs,
     eventId: raw.event_id ?? raw.id ?? null,
 
-    // Nå blir disse sofascoreTeamId (hvis vi kan)
     homeId: toSofaId(rawHome),
     awayId: toSofaId(rawAway),
 
     homeName: raw.home_team_name ?? raw.homeTeam?.name ?? "Home",
     awayName: raw.away_team_name ?? raw.awayTeam?.name ?? "Away",
 
-    // tournamentId beholdes som DB tournament_id (som matcher filnavn)
     tournamentId: raw.tournament_id ?? raw.tournament?.id ?? null,
     tournamentName: raw.tournament_name ?? raw.tournament?.name ?? "",
     seasonName: raw.season_name ?? raw.season?.name ?? "",
@@ -224,22 +217,6 @@ function titleCaseSafe(s){
   if (!x) return "";
   return x.charAt(0).toUpperCase() + x.slice(1);
 }
-function buildHeadline(e){
-  // Ikke si vinner – bare “duell” / “thriller” etc.
-  const hs = e.score?.homeSets ?? 0;
-  const as = e.score?.awaySets ?? 0;
-  const hasScore = (hs !== 0 || as !== 0 || safeArray(e.score?.sets).length > 0);
-
-  const tag = (() => {
-    if (!hasScore) return "Kamp i vente";
-    if (hs === as && hs !== 0) return "Helt jevnt";
-    if (Math.abs(hs-as) >= 2) return "Kontrollert oppgjør";
-    if (Math.abs(hs-as) === 1 && (hs+as) >= 4) return "Femsett-thriller";
-    return "Tett batalje";
-  })();
-
-  return `${tag}: ${e.homeName} – ${e.awayName}`;
-}
 
 /* ===========================
    Match card (Hub)
@@ -249,7 +226,7 @@ function MatchCard({
   statusLabel,
   isFocused,
   onToggleFocus,
-  summaryObj, // { summary, image_url } | "__loading__" | null
+  summaryObj, // { status, summary, summary_html, image_url, headline, subheadline, shock } | "__loading__" | null
 }){
   const hs = e.score?.homeSets ?? 0;
   const as = e.score?.awaySets ?? 0;
@@ -261,7 +238,6 @@ function MatchCard({
   const displayHomeSets = hasScore ? hs : "..";
   const displayAwaySets = hasScore ? as : "..";
 
-  const headline = buildHeadline(e);
   const whenTxt = nbDateTime(e.startTs);
   const compTxt = compHeaderText(e);
 
@@ -270,11 +246,19 @@ function MatchCard({
   // støtt både gammel ("__loading__") og ny ({status:"loading"})
   const loading = (summaryObj === "__loading__") || (obj?.status === "loading") || (obj?.summary === "__loading__");
 
-  // alltid les tekst/bilde fra objekt hvis det finnes
-  const summaryText = (!loading && obj) ? asStr(obj.summary) : "";
-  const imageUrlRaw = (!loading && obj) ? nonEmpty(obj.image_url) : null;
+  const headlineFromApi = (!loading && obj) ? nonEmpty(obj.headline) : null;
+  const subheadlineFromApi = (!loading && obj) ? nonEmpty(obj.subheadline) : null;
+  const shock = (!loading && obj) ? !!obj.shock : false;
 
-  // bygg riktig bilde-URL (støtter både "/img/..." og "https://...")
+  // fallback-headline hvis API ikke gir (men nå bør den gi)
+  const fallbackHeadline = `${(statusLabel || "KAMP")}: ${e.homeName} – ${e.awayName}`;
+  const headline = headlineFromApi || fallbackHeadline;
+
+  // Tekst/HTML
+  const summaryText = (!loading && obj) ? asStr(obj.summary) : "";
+  const summaryHtml = (!loading && obj) ? nonEmpty(obj.summary_html) : null;
+
+  const imageUrlRaw = (!loading && obj) ? nonEmpty(obj.image_url) : null;
   const imageUrl = imageUrlRaw
     ? (imageUrlRaw.startsWith("http") ? imageUrlRaw : (API_BASE_EVENTS + imageUrlRaw))
     : null;
@@ -364,18 +348,43 @@ function MatchCard({
                   justifyContent:"center",
                   fontWeight:900,
                   color:"#6b7280",
-                  letterSpacing:"0.02em"
+                  letterSpacing:"0.02em",
+                  padding:"0 10px",
+                  textAlign:"center",
                 }}
               >
                 {titleCaseSafe(statusLabel)} · {whenTxt || "—"}
               </div>
             )}
 
-            {/* Tekst */}
-            <div style={{ padding: "12px 14px", display:"grid", gap:8 }}>
-              <div style={{ fontSize: 18, fontWeight: 950, lineHeight: 1.15 }}>
-                {headline}
+            {/* Tekst/HTML */}
+            <div style={{ padding: "12px 14px", display:"grid", gap:10 }}>
+              {/* VG headline + sjokkbadge */}
+              <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+                <div style={{ fontSize: 18, fontWeight: 950, lineHeight: 1.15 }}>
+                  {headline}
+                </div>
+                {shock && (
+                  <span
+                    className="pill"
+                    style={{
+                      background:"#111827",
+                      color:"#fff",
+                      borderColor:"#111827",
+                      fontWeight:900
+                    }}
+                  >
+                    SJOKKTAP
+                  </span>
+                )}
               </div>
+
+              {/* Undertittel fra API */}
+              {subheadlineFromApi && (
+                <div style={{ fontSize: 13.5, fontWeight: 800, color:"#111827", lineHeight: 1.35 }}>
+                  {subheadlineFromApi}
+                </div>
+              )}
 
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center", color:"var(--muted)", fontSize:12 }}>
                 <span style={{ display:"inline-flex", gap:6, alignItems:"center" }}>
@@ -389,10 +398,20 @@ function MatchCard({
                 </span>
               </div>
 
-              <div style={{ fontSize: 13.5, lineHeight: 1.42, color:"#374151" }}>
-                {loading
-                  ? "Laster kampreferat…"
-                  : (summaryText ? summaryText : "Det finnes ikke kampreferat fra denne kampen")}
+              {/* Render HTML hvis vi har, ellers tekst */}
+              <div style={{ fontSize: 13.5, lineHeight: 1.45, color:"#374151" }}>
+                {loading ? (
+                  "Laster kampreferat…"
+                ) : (summaryHtml ? (
+                  <div
+                    className="matchStory"
+                    dangerouslySetInnerHTML={{ __html: summaryHtml }}
+                  />
+                ) : (summaryText ? (
+                  <pre style={{ whiteSpace:"pre-wrap", margin:0, fontFamily:"inherit" }}>{summaryText}</pre>
+                ) : (
+                  "Det finnes ikke kampreferat fra denne kampen"
+                )))}
               </div>
             </div>
           </div>
@@ -458,7 +477,7 @@ function App(){
   const [focusedEventKey, setFocusedEventKey] = useState(null);
   const [teamFilter, setTeamFilter] = useState("all");
 
-  // eventId -> "__loading__" | { summary, image_url } | { status:"loading", ... } | { status:"done", ... }
+  // eventId -> { status:"loading"|"done", summary, summary_html, image_url, headline, subheadline, shock, has_rally }
   const [summaryByEvent, setSummaryByEvent] = useState({});
 
   const [loading, setLoading] = useState(true);
@@ -503,21 +522,31 @@ function App(){
     return res.json();
   }
 
-  // ✅ NY: summary-cache som objekt (ikke string)
+  /* ===========================
+     Summary loader (supports new API fields)
+     =========================== */
   async function loadSummary(eventId){
     if (!eventId) return;
 
     const existing = summaryByEvent[eventId];
-    if (existing && existing.status === "done") return;   // allerede lastet
-    if (existing && existing.status === "loading") return; // allerede i gang
+    if (existing && existing.status === "done") return;
+    if (existing && existing.status === "loading") return;
 
     setSummaryByEvent(prev => ({
       ...prev,
-      [eventId]: { status:"loading", summary:"", image_url:null, has_rally:false }
+      [eventId]: {
+        status:"loading",
+        summary:"",
+        summary_html:null,
+        image_url:null,
+        headline:null,
+        subheadline:null,
+        shock:false,
+        has_rally:false
+      }
     }));
 
     try{
-      // Viktig: team_id er ID fra /teams (DB), ikke sofascoreTeamId
       const sofaId = selectedTeam?.sofascoreTeamId;
       const qs = (sofaId != null) ? `?sofa_team_id=${encodeURIComponent(sofaId)}` : "";
       const res = await fetch(
@@ -528,7 +557,7 @@ function App(){
       if (res.status === 404) {
         setSummaryByEvent(prev => ({
           ...prev,
-          [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+          [eventId]: { status:"done", summary:"", summary_html:null, image_url:null, headline:null, subheadline:null, shock:false, has_rally:false }
         }));
         return;
       }
@@ -541,7 +570,11 @@ function App(){
         [eventId]: {
           status: "done",
           summary: asStr(data?.summary),
+          summary_html: nonEmpty(data?.summary_html),
           image_url: nonEmpty(data?.image_url),
+          headline: nonEmpty(data?.headline),
+          subheadline: nonEmpty(data?.subheadline),
+          shock: !!data?.shock,
           has_rally: !!data?.has_rally
         }
       }));
@@ -549,7 +582,7 @@ function App(){
       console.warn("Summary failed", eventId, e);
       setSummaryByEvent(prev => ({
         ...prev,
-        [eventId]: { status:"done", summary:"", image_url:null, has_rally:false }
+        [eventId]: { status:"done", summary:"", summary_html:null, image_url:null, headline:null, subheadline:null, shock:false, has_rally:false }
       }));
     }
   }
@@ -694,7 +727,6 @@ function App(){
   useEffect(() => {
     if (!selectedTeam) return;
     loadTeamMatches(selectedTeam);
-    // når du bytter lag, kan du godt tømme gamle summaries
     setSummaryByEvent({});
     setFocusedEventKey(null);
   }, [selectedTeam]);
