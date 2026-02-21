@@ -160,30 +160,44 @@ const SetBox = memo(function SetBox(props) {
 /* ===========================
    Serve-icon
    =========================== */
+/*
+  Regler:
+  - run = 1: kun ball, ikke blink
+  - run = 2: ball + flamme, ikke blink
+  - run = 3: ball + flamme, blink (hotGlow)
+  - run >= 4: ball + flamme + 🎉, blink (hotGlow)
+*/
 
-function ServeIcon({ side, hot, highlight }) {
+function ServeIcon({ side, run }) {
+  const level = Number(run || 0);
+  const hasFlame = level >= 2;
+  const isHot = level >= 3;      // 3+ → blink
+  const hasParty = level >= 4;   // 4+ → 🎉
+
   const className =
     "serveIcon " +
     (side === "home" ? "home" : "away") +
-    (hot ? " hot" : "") +
-    (highlight ? " blinkScore" : "");
+    (isHot ? " hot" : "");
+
+  let title = "Server";
+  if (level === 1) title = "Side-out (ny serve)";
+  else if (level === 2) title = "Break-point";
+  else if (level === 3) title = "Dbl break-ball";
+  else if (level >= 4) title = "Party-run";
 
   const isHome = side === "home";
 
   return (
     <span
       className={className}
-      title={
-        hot
-          ? "Poeng-run på egen serve"
-          : "Server"
-      }
+      title={title}
       aria-hidden="true"
     >
       <span className="serveIconInner">
-        {hot && isHome && <span>🔥</span>}
+        {isHome && hasFlame && <span>🔥</span>}
         <span>🏐</span>
-        {hot && !isHome && <span>🔥</span>}
+        {!isHome && hasFlame && <span>🔥</span>}
+        {hasParty && <span>🎉</span>}
       </span>
     </span>
   );
@@ -709,22 +723,8 @@ function EventCard(props) {
   const homeLogo = teamLogoUrl(homeId);
   const awayLogo = teamLogoUrl(awayId);
 
-  const runHome = Number(ev.home_point_run ?? 0);
-  const runAway = Number(ev.away_point_run ?? 0);
-
   const isServingHome = serveInfo && serveInfo.side === "home";
   const isServingAway = serveInfo && serveInfo.side === "away";
-
-  const serveRunHome = isServingHome ? (serveInfo.run ?? runHome) : 0;
-  const serveRunAway = isServingAway ? (serveInfo.run ?? runAway) : 0;
-
-  // Ball: alltid på server
-  // Flamme: run >= 2
-  // Blinkende flamme: run >= 4
-  const flameHome = serveRunHome >= 2;
-  const flameAway = serveRunAway >= 2;
-  const hotHome = serveRunHome >= 4;
-  const hotAway = serveRunAway >= 4;
 
   // Hvilken side fikk poeng akkurat nå? (kun denne skal blinke på tall)
   const scoredSide =
@@ -734,10 +734,17 @@ function EventCard(props) {
   const cls = "card" + (isFocused ? " focused" : "");
 
   let playText = null;
-  if (playLabelInfo && playLabelInfo.type === "break-point") {
-    playText = "Break-point";
-  } else if (playLabelInfo && playLabelInfo.type === "side-out") {
-    playText = "Side-out";
+  if (playLabelInfo) {
+    if (playLabelInfo.type === "side-out") {
+      playText = "Side-out";
+    } else if (playLabelInfo.type === "break-point") {
+      playText = "Break-point";
+    } else if (playLabelInfo.type === "dbl-break-ball") {
+      playText = "Dbl break-ball";
+    } else if (playLabelInfo.type === "party") {
+      // Ingen ekstra tekst for party; kun ikoner
+      playText = null;
+    }
   }
 
   const { tournament, season } = getTournamentAndSeason(ev);
@@ -831,8 +838,7 @@ function EventCard(props) {
                 {isServingHome && (
                   <ServeIcon
                     side="home"
-                    hot={flameHome}
-                    highlight={hotHome}
+                    run={serveInfo.run}
                   />
                 )}
               </span>
@@ -849,8 +855,7 @@ function EventCard(props) {
                 {isServingAway && (
                   <ServeIcon
                     side="away"
-                    hot={flameAway}
-                    highlight={hotAway}
+                    run={serveInfo.run}
                   />
                 )}
               </span>
@@ -871,7 +876,11 @@ function EventCard(props) {
                 <div
                   className={
                     "playLabel " +
-                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
+                    (playLabelInfo.type === "break-point"
+                      ? "break-point"
+                      : playLabelInfo.type === "side-out"
+                      ? "side-out"
+                      : "break-point")
                   }
                 >
                   {playText}
@@ -1075,27 +1084,38 @@ function App() {
         const newScore = Number(ev.new_score ?? 0);
 
         let serveSide = null;
+        let currentRun = 0;
+
         if (runHome > 0 && runAway === 0) {
           serveSide = "home";
+          currentRun = runHome;
         } else if (runAway > 0 && runHome === 0) {
           serveSide = "away";
+          currentRun = runAway;
         }
 
-        if (newScore === 1 && serveSide) {
+        if (newScore === 1 && serveSide && currentRun > 0) {
           // Blink kun når det faktisk er NYTT poeng
           newFlash[key] = {};
           newFlash[key][serveSide] = now + Math.random();
 
-          const run = (serveSide === "home") ? runHome : runAway;
-          let labelType = "side-out";
-          if (run >= 2) {
+          let labelType = null;
+          if (currentRun === 1) {
+            labelType = "side-out";
+          } else if (currentRun === 2) {
             labelType = "break-point";
+          } else if (currentRun === 3) {
+            labelType = "dbl-break-ball";
+          } else if (currentRun >= 4) {
+            labelType = "party";
           }
 
-          newPlayLabel[key] = {
-            side: serveSide,
-            type: labelType,
-          };
+          if (labelType) {
+            newPlayLabel[key] = {
+              side: serveSide,
+              type: labelType,
+            };
+          }
         }
       }
 
@@ -1328,6 +1348,7 @@ function App() {
 
           const runHome = Number(ev.home_point_run ?? 0);
           const runAway = Number(ev.away_point_run ?? 0);
+
           let serveInfo = null;
           if (runHome > 0 && runAway === 0) {
             serveInfo = { side: "home", run: runHome };
