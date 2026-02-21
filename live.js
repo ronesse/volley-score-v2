@@ -682,9 +682,6 @@ const PlayerAvatar = memo(function PlayerAvatar({ player }) {
 function EventCard(props) {
   const {
     ev,
-    flashInfo,
-    serveInfo,
-    playLabelInfo,
     isFocused,
     onClick,
     isAbroadGroup,
@@ -709,37 +706,35 @@ function EventCard(props) {
   const homeLogo = teamLogoUrl(homeId);
   const awayLogo = teamLogoUrl(awayId);
 
-  const isServingHome = serveInfo && serveInfo.side === "home";
-  const isServingAway = serveInfo && serveInfo.side === "away";
+  // Nye backend-felter:
+  const homeRun = ev.home_point_run ?? 0;
+  const awayRun = ev.away_point_run ?? 0;
+  const isNewScore = ev.new_score === 1;
 
-  // Hvilken side fikk poeng akkurat nå? (kun denne skal blinke)
-  const scoredSide =
-    flashInfo && flashInfo.home ? "home" :
-    (flashInfo && flashInfo.away ? "away" : null);
+  const isServingHome = homeRun > 0;
+  const isServingAway = awayRun > 0;
 
-  // Break-point (🔥) kun når:
-  // - vi har playLabelInfo.type === "break-point"
-  // - playLabelInfo.side matcher siden
-  // - det er denne siden som nettopp fikk poeng (scoredSide)
-  const breakHome =
-    playLabelInfo &&
-    playLabelInfo.type === "break-point" &&
-    playLabelInfo.side === "home" &&
-    scoredSide === "home";
+  const justScoredHome = isNewScore && homeRun > 0;
+  const justScoredAway = isNewScore && awayRun > 0;
 
-  const breakAway =
-    playLabelInfo &&
-    playLabelInfo.type === "break-point" &&
-    playLabelInfo.side === "away" &&
-    scoredSide === "away";
+  const blinkHome = justScoredHome;
+  const blinkAway = justScoredAway;
+
+  const hotHome = homeRun >= 2;
+  const hotAway = awayRun >= 2;
+
+  const scoredSide = justScoredHome ? "home" : (justScoredAway ? "away" : null);
 
   const cls = "card" + (isFocused ? " focused" : "");
 
   let playText = null;
-  if (playLabelInfo && playLabelInfo.type === "break-point") {
-    playText = "Break-point";
-  } else if (playLabelInfo && playLabelInfo.type === "side-out") {
-    playText = "Side-out";
+  if (justScoredHome || justScoredAway) {
+    const run = justScoredHome ? homeRun : awayRun;
+    if (run >= 2) {
+      playText = "Break-point";
+    } else {
+      playText = "Side-out";
+    }
   }
 
   const { tournament, season } = getTournamentAndSeason(ev);
@@ -790,7 +785,7 @@ function EventCard(props) {
           <span
             className={
               statusDot(ev.status_type) +
-              (scoredSide ? " blinkScore" : "")
+              (isNewScore ? " blinkScore" : "")
             }
           ></span>
           {label + (ev.status_desc ? " · " + String(ev.status_desc) : "")}
@@ -825,16 +820,15 @@ function EventCard(props) {
         <div className="bigScore">
           <div className="pointsMain">
             <span
-              key={"ph-" + (flashInfo.home || 0)}
-              className={"pointVal" + (flashInfo.home ? " blinkScore" : "")}
+              className={"pointVal" + (blinkHome ? " blinkScore" : "")}
             >
               <span className="pointWrap home">
                 <span className="pointNumber">{p.home ?? "—"}</span>
                 {isServingHome && (
                   <ServeIcon
                     side="home"
-                    hot={breakHome}
-                    highlight={scoredSide === "home"}
+                    hot={hotHome}
+                    highlight={blinkHome}
                   />
                 )}
               </span>
@@ -843,16 +837,15 @@ function EventCard(props) {
             <span className="pointSep">-</span>
 
             <span
-              key={"pa-" + (flashInfo.away || 0)}
-              className={"pointVal" + (flashInfo.away ? " blinkScore" : "")}
+              className={"pointVal" + (blinkAway ? " blinkScore" : "")}
             >
               <span className="pointWrap away">
                 <span className="pointNumber">{p.away ?? "—"}</span>
                 {isServingAway && (
                   <ServeIcon
                     side="away"
-                    hot={breakAway}
-                    highlight={scoredSide === "away"}
+                    hot={hotAway}
+                    highlight={blinkAway}
                   />
                 )}
               </span>
@@ -873,7 +866,7 @@ function EventCard(props) {
                 <div
                   className={
                     "playLabel " +
-                    (playLabelInfo.type === "break-point" ? "break-point" : "side-out")
+                    (homeRun >= 2 || awayRun >= 2 ? "break-point" : "side-out")
                   }
                 >
                   {playText}
@@ -936,9 +929,6 @@ function App() {
   const [error, setError] = useState("");
 
   const [filter, setFilter] = useState("other");
-  const [flash, setFlash] = useState({});
-  const [serve, setServe] = useState({});
-  const [playLabel, setPlayLabel] = useState({});
   const [focusedId, setFocusedId] = useState(null);
 
   const [teams, setTeams] = useState([]);
@@ -946,11 +936,7 @@ function App() {
 
   const pollRef = useRef(null);
   const abortLiveRef = useRef(null);
-  const serveRef = useRef({});
   const wakeLockRef = useRef(null);
-
-  // forrige (setNo, poeng) per kamp
-  const pointsRef = useRef(new Map());
 
   const fetchJson = useCallback(async (path, signal) => {
     const res = await fetch(API_BASE + path, {
@@ -1057,7 +1043,7 @@ function App() {
     return map;
   }, [players]);
 
-  /* ---- Hent live og scorer per kamp ---- */
+  /* ---- Hent live ---- */
 
   const loadLive = useCallback(async () => {
     if (abortLiveRef.current) abortLiveRef.current.abort();
@@ -1068,78 +1054,6 @@ function App() {
       setError("");
       const data = await fetchJson("/live", controller.signal);
       const nextEvents = safeArray(data);
-
-      const prevServeMap = serveRef.current || {};
-      const prevPointsMap = pointsRef.current || new Map();
-
-      const newServe = {};
-      const newPlayLabel = {};
-      const newFlash = {};
-
-      const now = Date.now();
-
-      // Ny map for lagring av (setNo, home, away) per kamp
-      const nextPointsMap = new Map(prevPointsMap);
-
-      for (let i = 0; i < nextEvents.length; i++) {
-        const ev = nextEvents[i];
-        const key = eventKey(ev);
-
-        const p = currentPoints(ev); // { setNo, home, away }
-        const prev = prevPointsMap.get(key) || null;
-
-        let sideScored = null;
-
-        // Trigg KUN når vi er i samme sett og poeng faktisk øker
-        if (prev && p.setNo != null && prev.setNo != null && p.setNo === prev.setNo) {
-          if (p.home != null && prev.home != null && p.home > prev.home) {
-            sideScored = "home";
-          } else if (p.away != null && prev.away != null && p.away > prev.away) {
-            sideScored = "away";
-          }
-        }
-
-        // Oppdater lagret score for denne kampen (alltid)
-        nextPointsMap.set(key, {
-          setNo: p.setNo,
-          home: p.home,
-          away: p.away,
-        });
-
-        const prevServe = prevServeMap[key] || null;
-        let currentServe = prevServe;
-        let label = null;
-
-        if (sideScored) {
-          // Unik verdi for å tvinge React til å re-rendre blink
-          newFlash[key] = { [sideScored]: now + Math.random() };
-
-          if (prevServe && prevServe.side === sideScored) {
-            // Poeng på egen serve ⇒ break-point
-            currentServe = { side: sideScored, hot: true };
-            label = { side: sideScored, type: "break-point" };
-          } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
-            // Poeng i mottak ⇒ side-out
-            currentServe = { side: sideScored, hot: false };
-            label = { side: sideScored, type: "side-out" };
-          } else {
-            // Første gang vi vet hvem som server ⇒ flytt ballen, ingen label
-            currentServe = { side: sideScored, hot: false };
-          }
-        }
-
-        newServe[key] = currentServe || null;
-        if (label) newPlayLabel[key] = label;
-      }
-
-      // Lagre til neste poll (per kamp)
-      pointsRef.current = nextPointsMap;
-      serveRef.current = newServe;
-
-      // Oppdater React-state
-      setFlash(newFlash);
-      setServe(newServe);
-      setPlayLabel(newPlayLabel);
       setEvents(nextEvents);
     } catch (e) {
       if (String(e && e.name) === "AbortError") return;
@@ -1349,9 +1263,6 @@ function App() {
       <div className="grid">
         {visible.map(ev => {
           const keyStr = eventKey(ev);
-          const flashInfo = flash[keyStr] || {};
-          const serveInfo = serve[keyStr] || {};
-          const playLabelInfo = playLabel[keyStr] || null;
           const isFocused = focusedId != null && eventId(ev) === focusedId;
 
           const id = eventId(ev);
@@ -1370,9 +1281,6 @@ function App() {
             <EventCard
               key={keyStr}
               ev={ev}
-              flashInfo={flashInfo}
-              serveInfo={serveInfo}
-              playLabelInfo={playLabelInfo}
               isFocused={isFocused}
               isAbroadGroup={isAbroadGroup}
               norPlayersHome={norPlayersHome}
