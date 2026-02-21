@@ -949,7 +949,7 @@ function App() {
   const serveRef = useRef({});
   const wakeLockRef = useRef(null);
 
-  // forrige poeng per kamp
+  // forrige (setNo, poeng) per kamp
   const pointsRef = useRef(new Map());
 
   const fetchJson = useCallback(async (path, signal) => {
@@ -1070,45 +1070,60 @@ function App() {
       const nextEvents = safeArray(data);
 
       const prevServeMap = serveRef.current || {};
+      const prevPointsMap = pointsRef.current || new Map();
+
       const newServe = {};
       const newPlayLabel = {};
       const newFlash = {};
+
       const now = Date.now();
 
-      const nextPointsMap = new Map(pointsRef.current);
+      // Ny map for lagring av (setNo, home, away) per kamp
+      const nextPointsMap = new Map(prevPointsMap);
 
       for (let i = 0; i < nextEvents.length; i++) {
         const ev = nextEvents[i];
         const key = eventKey(ev);
-        const p = currentPoints(ev);
 
-        const prev = nextPointsMap.get(key) || { home: null, away: null };
+        const p = currentPoints(ev); // { setNo, home, away }
+        const prev = prevPointsMap.get(key) || null;
 
         let sideScored = null;
-        if (p.home != null && prev.home != null && p.home > prev.home) {
-          sideScored = "home";
-        }
-        if (p.away != null && prev.away != null && p.away > prev.away) {
-          sideScored = "away";
+
+        // Trigg KUN når vi er i samme sett og poeng faktisk øker
+        if (prev && p.setNo != null && prev.setNo != null && p.setNo === prev.setNo) {
+          if (p.home != null && prev.home != null && p.home > prev.home) {
+            sideScored = "home";
+          } else if (p.away != null && prev.away != null && p.away > prev.away) {
+            sideScored = "away";
+          }
         }
 
-        nextPointsMap.set(key, { home: p.home, away: p.away });
+        // Oppdater lagret score for denne kampen (alltid)
+        nextPointsMap.set(key, {
+          setNo: p.setNo,
+          home: p.home,
+          away: p.away,
+        });
 
         const prevServe = prevServeMap[key] || null;
         let currentServe = prevServe;
         let label = null;
 
         if (sideScored) {
-          newFlash[key] = {};
-          newFlash[key][sideScored] = now + Math.random();
+          // Unik verdi for å tvinge React til å re-rendre blink
+          newFlash[key] = { [sideScored]: now + Math.random() };
 
           if (prevServe && prevServe.side === sideScored) {
+            // Poeng på egen serve ⇒ break-point
             currentServe = { side: sideScored, hot: true };
             label = { side: sideScored, type: "break-point" };
           } else if (prevServe && prevServe.side && prevServe.side !== sideScored) {
+            // Poeng i mottak ⇒ side-out
             currentServe = { side: sideScored, hot: false };
             label = { side: sideScored, type: "side-out" };
           } else {
+            // Første gang vi vet hvem som server ⇒ flytt ballen, ingen label
             currentServe = { side: sideScored, hot: false };
           }
         }
@@ -1117,9 +1132,11 @@ function App() {
         if (label) newPlayLabel[key] = label;
       }
 
+      // Lagre til neste poll (per kamp)
       pointsRef.current = nextPointsMap;
       serveRef.current = newServe;
 
+      // Oppdater React-state
       setFlash(newFlash);
       setServe(newServe);
       setPlayLabel(newPlayLabel);
