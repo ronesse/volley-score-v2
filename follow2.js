@@ -4,7 +4,6 @@ const { useEffect, useMemo, useState } = React;
 /**
  * Vi gjenbruker samme base-URL som live2.js
  * (API_BASE er definert der i global scope).
- * Hvis du vil ha egen base, kan du bytte til API_BASE_EVENTS.
  */
 
 const FOLLOW_LOOKAHEAD_DAYS = 30; // hvor langt frem vi ser etter neste kamp
@@ -97,11 +96,46 @@ function Countdown({ startTs }){
 }
 
 /* ===========================
+   Normalisering av events
+   (DB team-id → SofaScore-lag-id)
+   =========================== */
+
+function normalizeEventForFollow(raw, sofaTeamIdByDbTeamId){
+  const startTs = raw.start_ts ?? raw.startTimestamp ?? null;
+
+  const rawHome = raw.home_team_id ?? raw.homeTeam?.id ?? null;
+  const rawAway = raw.away_team_id ?? raw.awayTeam?.id ?? null;
+
+  function toSofaId(x){
+    if (x == null) return null;
+    const n = Number(x);
+
+    // Ser ut som SofaScore-id (store tall) → bruk direkte
+    if (Number.isFinite(n) && n > 1000) return n;
+
+    const key = String(x);
+    if (sofaTeamIdByDbTeamId && sofaTeamIdByDbTeamId.has(key)) {
+      return sofaTeamIdByDbTeamId.get(key);
+    }
+
+    // fallback: returner tallet hvis det ser greit ut
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return {
+    raw,
+    startTs,
+    eventId: raw.event_id ?? raw.id ?? null,
+    homeSofaId: toSofaId(rawHome),
+    awaySofaId: toSofaId(rawAway),
+  };
+}
+
+/* ===========================
    Kampkort for "Mine lag"
    =========================== */
 
 function MyTeamMatchCard({ ev, team, isHome }){
-  // Vi gjenbruker helpers fra live2.js hvis de finnes
   const homeId = getHomeId(ev);
   const awayId = getAwayId(ev);
 
@@ -239,15 +273,28 @@ function FollowApp(){
   const [followedIds, setFollowedIds] = useState(() => loadFollowedIds());
   const [search, setSearch] = useState("");
 
-  // Map sofascoreTeamId -> team
+  // Map: DB team.id (string) -> sofascore_team_id (number)
+  const sofaTeamIdByDbTeamId = useMemo(() => {
+    const m = new Map();
+    for (const t of teams) {
+      if (t == null) continue;
+      const dbId = nonEmpty(t.id);
+      const sofaId = asNum(t.sofascore_team_id ?? t.sofascoreTeamId);
+      if (!dbId || sofaId == null) continue;
+      m.set(String(dbId), sofaId);
+    }
+    return m;
+  }, [teams]);
+
+  // Map: sofascoreTeamId (number) -> team object
   const teamsBySofaId = useMemo(() => {
     const m = new Map();
     for (const t of teams) {
-      const id = asNum(t.sofascore_team_id ?? t.sofascoreTeamId);
-      if (!id) continue;
-      m.set(id, {
+      const sofaId = asNum(t.sofascore_team_id ?? t.sofascoreTeamId);
+      if (!sofaId) continue;
+      m.set(sofaId, {
         id: asNum(t.id),
-        sofascoreId: id,
+        sofascoreId: sofaId,
         name: asStr(t.name || t.widget_name || "—"),
         country: nonEmpty(t.country),
         league: nonEmpty(t.league),
@@ -335,33 +382,38 @@ function FollowApp(){
     return arr;
   }, [teamsBySofaId, search]);
 
-  // Finn neste kamp for hvert fulgt lag
+  // Normaliser events (DB-id -> SofaScore-id)
+  const normalizedEvents = useMemo(() => {
+    return events.map(ev => normalizeEventForFollow(ev, sofaTeamIdByDbTeamId));
+  }, [events, sofaTeamIdByDbTeamId]);
+
+  // Finn neste kamp for hvert fulgt lag (NØYAKTIG nærmest frem i tid)
   const nextByTeam = useMemo(() => {
     const nowSec = Math.floor(Date.now()/1000);
-    const map = new Map(); // sofaId -> {team, event}
+    const map = new Map(); // sofaId -> {team, eventNorm, isHome}
 
-    function consider(sofaId, ev, isHome){
-      const startTs = ev.start_ts ?? ev.startTimestamp ?? null;
+    function consider(sofaId, evNorm, isHome){
+      const startTs = evNorm.startTs;
       if (!startTs || startTs < nowSec) return;
+
       const current = map.get(sofaId);
-      if (!current || startTs < (current.event.start_ts ?? current.event.startTimestamp ?? Infinity)) {
+      if (!current || startTs < (current.eventNorm.startTs ?? Infinity)) {
         const team = teamsBySofaId.get(sofaId);
         if (team) {
-          map.set(sofaId, { team, event: ev, isHome });
+          map.set(sofaId, { team, eventNorm: evNorm, isHome });
         }
       }
     }
 
-    for (const ev of events) {
-      const homeId = asNum(getHomeId(ev));
-      const awayId = asNum(getAwayId(ev));
-      if (!homeId && !awayId) continue;
+    for (const evNorm of normalizedEvents) {
+      const homeSofa = evNorm.homeSofaId;
+      const awaySofa = evNorm.awaySofaId;
 
-      if (homeId && followedIds.includes(homeId)) {
-        consider(homeId, ev, true);
+      if (homeSofa && followedIds.includes(homeSofa)) {
+        consider(homeSofa, evNorm, true);
       }
-      if (awayId && followedIds.includes(awayId)) {
-        consider(awayId, ev, false);
+      if (awaySofa && followedIds.includes(awaySofa)) {
+        consider(awaySofa, evNorm, false);
       }
     }
 
@@ -370,14 +422,14 @@ function FollowApp(){
     for (const [sofaId, obj] of map.entries()) {
       out.push({ sofascoreId: sofaId, ...obj });
     }
-    // sorter på kampstart
+    // sorter på kampstart (nærmest først)
     out.sort((a,b) => {
-      const ta = a.event.start_ts ?? a.event.startTimestamp ?? Infinity;
-      const tb = b.event.start_ts ?? b.event.startTimestamp ?? Infinity;
+      const ta = a.eventNorm.startTs ?? Infinity;
+      const tb = b.eventNorm.startTs ?? Infinity;
       return ta - tb;
     });
     return out;
-  }, [events, followedIds, teamsBySofaId]);
+  }, [normalizedEvents, followedIds, teamsBySofaId]);
 
   const hasFollowed = followedIds.length > 0;
 
@@ -422,7 +474,7 @@ function FollowApp(){
                 Lag du følger
               </div>
               <div style={{ fontSize:12, color:"var(--muted)", marginBottom:8 }}>
-                Klikk på et lag for å følge/avfølge. Vi viser neste kamp for hvert lag du følger.
+                Klikk på et lag for å følge/avfølge. Vi viser neste registrerte kamp for hvert lag du følger.
               </div>
 
               <div style={{
@@ -494,10 +546,10 @@ function FollowApp(){
 
             {nextByTeam.length > 0 && (
               <div className="grid">
-                {nextByTeam.map(({ team, event, isHome }) => (
+                {nextByTeam.map(({ team, eventNorm, isHome }) => (
                   <MyTeamMatchCard
-                    key={String(team.sofascoreId) + "-" + String(event.event_id ?? event.custom_id ?? event.id ?? "")}
-                    ev={event}
+                    key={String(team.sofascoreId) + "-" + String(eventNorm.eventId ?? "")}
+                    ev={eventNorm.raw}
                     team={team}
                     isHome={isHome}
                   />
