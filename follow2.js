@@ -5,7 +5,9 @@ const { useEffect, useMemo, useState } = React;
  * Vi gjenbruker samme base-URL som live2.js
  * (API_BASE er definert der i global scope).
  */
-const FOLLOW_LOOKAHEAD_DAYS = 30; // hvor langt frem vi ser etter neste kamp
+
+// stort vindu – vi viser uansett bare KAMPEN som er nærmest i tid per lag
+const FOLLOW_LOOKAHEAD_DAYS = 365;
 
 /* ===========================
    Generelle helpers
@@ -19,8 +21,33 @@ function asNum(v){
   return Number.isFinite(n) ? n : null;
 }
 
-function getHomeId(ev) { return ev.home_team_id ?? ev.home_teams_id ?? null; }
-function getAwayId(ev) { return ev.away_team_id ?? ev.away_teams_id ?? null; }
+function getHomeId(ev) { return ev.home_team_id ?? ev.home_teams_id ?? ev.homeTeam?.id ?? null; }
+function getAwayId(ev) { return ev.away_team_id ?? ev.away_teams_id ?? ev.awayTeam?.id ?? null; }
+
+/* ===========================
+   Lagre fulgte lag i localStorage
+   =========================== */
+
+const LS_KEY = "volley_followed_teams_v1";
+
+function loadFollowedIds(){
+  try{
+    const raw = window.localStorage.getItem(LS_KEY);
+    if(!raw) return [];
+    const arr = JSON.parse(raw);
+    if(!Array.isArray(arr)) return [];
+    return arr.map(x => Number(x)).filter(n => Number.isFinite(n));
+  } catch(e){
+    return [];
+  }
+}
+
+function saveFollowedIds(ids){
+  try{
+    const arr = Array.from(new Set(ids.map(x => Number(x)).filter(n => Number.isFinite(n))));
+    window.localStorage.setItem(LS_KEY, JSON.stringify(arr));
+  } catch(e){}
+}
 
 /* ===========================
    Countdown-komponent
@@ -106,7 +133,7 @@ function normalizeEventForFollow(raw, sofaTeamIdByDbTeamId){
 }
 
 /* ===========================
-   Kampkort for "Alle lag"
+   Kampkort for "Mine lag"
    =========================== */
 
 function MyTeamMatchCard({ ev, team, isHome }){
@@ -235,7 +262,7 @@ function MyTeamMatchCard({ ev, team, isHome }){
 }
 
 /* ===========================
-   Hoved-app "Alle lag · neste kamp"
+   Hoved-app "Mine lag"
    =========================== */
 
 function FollowApp(){
@@ -243,6 +270,9 @@ function FollowApp(){
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+
+  const [followedIds, setFollowedIds] = useState(() => loadFollowedIds());
+  const [search, setSearch] = useState("");
 
   // Map: DB team.id (string) -> sofascore_team_id (number)
   const sofaTeamIdByDbTeamId = useMemo(() => {
@@ -292,7 +322,7 @@ function FollowApp(){
         const teamsJson = await teamsRes.json();
         if (!cancelled) setTeams(safeArray(teamsJson));
 
-        // 2) Events (kommende x dager frem)
+        // 2) Events (kommende X dager frem – her 1 år)
         const nowSec = Math.floor(Date.now()/1000);
         const toSec  = nowSec + FOLLOW_LOOKAHEAD_DAYS*86400;
 
@@ -324,12 +354,41 @@ function FollowApp(){
     return () => { cancelled = true; };
   }, []);
 
+  // Toggle follow for et team
+  function toggleFollow(sofaId){
+    setFollowedIds(prev => {
+      const id = Number(sofaId);
+      let next;
+      if (prev.includes(id)) {
+        next = prev.filter(x => x !== id);
+      } else {
+        next = [...prev, id];
+      }
+      saveFollowedIds(next);
+      return next;
+    });
+  }
+
+  // Filtrer teams for venstresiden (valg-liste)
+  const filteredTeams = useMemo(() => {
+    const q = asStr(search).toLowerCase();
+    const arr = [];
+    for (const [sofaId, t] of teamsBySofaId.entries()) {
+      if (!q || t.name.toLowerCase().includes(q) || (t.league || "").toLowerCase().includes(q)) {
+        arr.push({ ...t, sofascoreId: sofaId });
+      }
+    }
+    // sortér alfabetisk
+    arr.sort((a,b) => a.name.localeCompare(b.name, "nb"));
+    return arr;
+  }, [teamsBySofaId, search]);
+
   // Normaliser events (DB-id -> SofaScore-id)
   const normalizedEvents = useMemo(() => {
     return events.map(ev => normalizeEventForFollow(ev, sofaTeamIdByDbTeamId));
   }, [events, sofaTeamIdByDbTeamId]);
 
-  // Finn NESTE kamp for hvert lag (nærmest fra dagens dato)
+  // Finn NESTE kamp for hvert fulgt lag (minst positiv diff fra nå)
   const nextByTeam = useMemo(() => {
     const nowSec = Math.floor(Date.now() / 1000);
     const map = new Map(); // sofaId -> { team, eventNorm, isHome, diff }
@@ -338,7 +397,7 @@ function FollowApp(){
       const team = teamsBySofaId.get(sofaId);
       if (!team) return;
 
-      const startTsNum = Number(evNorm.startTs || 0);
+      const startTsNum = Number(evNorm.startTs);
       if (!Number.isFinite(startTsNum)) return;
 
       const diff = startTsNum - nowSec;
@@ -354,8 +413,12 @@ function FollowApp(){
       const homeSofa = evNorm.homeSofaId;
       const awaySofa = evNorm.awaySofaId;
 
-      if (homeSofa) consider(homeSofa, evNorm, true);
-      if (awaySofa) consider(awaySofa, evNorm, false);
+      if (homeSofa && followedIds.includes(homeSofa)) {
+        consider(homeSofa, evNorm, true);
+      }
+      if (awaySofa && followedIds.includes(awaySofa)) {
+        consider(awaySofa, evNorm, false);
+      }
     }
 
     const out = [];
@@ -367,7 +430,51 @@ function FollowApp(){
     out.sort((a, b) => a.diff - b.diff);
 
     return out;
-  }, [normalizedEvents, teamsBySofaId]);
+  }, [normalizedEvents, followedIds, teamsBySofaId]);
+
+  // === NYTT: slå sammen kamper når du følger begge lagene ===
+  const uniqueMatches = useMemo(() => {
+    const byEvent = new Map(); // eventId -> { eventNorm, teams: [{team,isHome}], diff }
+
+    for (const item of nextByTeam) {
+      const evId = item.eventNorm.eventId || (
+        // fallback-key (hvis eventId mangler)
+        `${item.eventNorm.startTs || "0"}-${item.team.sofascoreId}`
+      );
+
+      const existing = byEvent.get(evId);
+      if (!existing) {
+        byEvent.set(evId, {
+          eventNorm: item.eventNorm,
+          teams: [{ team: item.team, isHome: item.isHome }],
+          diff: item.diff,
+        });
+      } else {
+        // legg til ekstra lag i samme kamp
+        existing.teams.push({ team: item.team, isHome: item.isHome });
+        // diff skal være den samme, men vi tar minste bare for sikkerhets skyld
+        if (item.diff < existing.diff) existing.diff = item.diff;
+      }
+    }
+
+    const arr = [];
+    for (const [evId, obj] of byEvent.entries()) {
+      // velg "primær"-team å vise (første i lista)
+      const primary = obj.teams[0];
+      arr.push({
+        eventNorm: obj.eventNorm,
+        team: primary.team,
+        isHome: primary.isHome,
+        diff: obj.diff,
+      });
+    }
+
+    // sorter på diff (nærmeste kamper først)
+    arr.sort((a,b) => a.diff - b.diff);
+    return arr;
+  }, [nextByTeam]);
+
+  const hasFollowed = followedIds.length > 0;
 
   return (
     <div>
@@ -375,8 +482,17 @@ function FollowApp(){
         <div className="badges">
           <div className="badge">
             <span className="dot gray"></span>
-            Alle lag · neste kamp
+            Mine lag · neste kamp
           </div>
+        </div>
+        <div className="controls">
+          <input
+            type="text"
+            placeholder="Søk etter lag for å følge…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ maxWidth:220 }}
+          />
         </div>
       </div>
 
@@ -393,31 +509,98 @@ function FollowApp(){
       )}
 
       {!loading && (
-        <>
-          {nextByTeam.length === 0 && (
+        <div className="row" style={{ marginTop:10 }}>
+          {/* Venstre: velge lag */}
+          <div style={{ flex:"0 0 280px", maxWidth:280 }}>
             <div className="card">
-              <div style={{ fontWeight:800, marginBottom:6 }}>
-                Ingen kommende kamper
+              <div style={{ fontWeight:800, marginBottom:8, fontSize:14 }}>
+                Lag du følger
               </div>
-              <div style={{ fontSize:13, color:"var(--muted)" }}>
-                Vi fant ingen kamper de neste {FOLLOW_LOOKAHEAD_DAYS} dagene for lagene i databasen.
+              <div style={{ fontSize:12, color:"var(--muted)", marginBottom:8 }}>
+                Klikk på et lag for å følge/avfølge. Vi viser neste registrerte kamp for hvert lag du følger.
               </div>
-            </div>
-          )}
 
-          {nextByTeam.length > 0 && (
-            <div className="grid" style={{ marginTop:10 }}>
-              {nextByTeam.map(({ team, eventNorm, isHome }) => (
-                <MyTeamMatchCard
-                  key={String(team.sofascoreId) + "-" + String(eventNorm.eventId ?? "")}
-                  ev={eventNorm.raw}
-                  team={team}
-                  isHome={isHome}
-                />
-              ))}
+              <div style={{
+                maxHeight: 380,
+                overflow:"auto",
+                borderTop:"1px solid var(--border)",
+                marginTop:8,
+                paddingTop:8
+              }}>
+                {filteredTeams.map(t => {
+                  const isOn = followedIds.includes(t.sofascoreId);
+                  return (
+                    <button
+                      key={t.sofascoreId}
+                      type="button"
+                      className="btn"
+                      style={{
+                        width:"100%",
+                        justifyContent:"space-between",
+                        marginBottom:6,
+                        background: isOn ? "#111827" : "#ffffff",
+                        color: isOn ? "#ffffff" : "#111827",
+                        borderColor: isOn ? "#111827" : "var(--border)"
+                      }}
+                      onClick={() => toggleFollow(t.sofascoreId)}
+                    >
+                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {t.name}
+                      </span>
+                      <span>
+                        {isOn ? "✓ Følges" : "Følg"}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {filteredTeams.length === 0 && (
+                  <div style={{ fontSize:12, color:"var(--muted)" }}>
+                    Ingen lag matcher søkeresultatet.
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </>
+          </div>
+
+          {/* Høyre: neste kamp per lag (uten duplikate kamper) */}
+          <div style={{ flex:"1 1 auto", minWidth:0 }}>
+            {!hasFollowed && (
+              <div className="card">
+                <div style={{ fontWeight:800, marginBottom:6 }}>
+                  Du følger ingen lag ennå
+                </div>
+                <div style={{ fontSize:13, color:"var(--muted)" }}>
+                  Bruk listen til venstre for å markere lag du vil følge. Da viser vi neste registrerte kamp for hvert lag, med nedtelling til kampstart.
+                </div>
+              </div>
+            )}
+
+            {hasFollowed && uniqueMatches.length === 0 && (
+              <div className="card">
+                <div style={{ fontWeight:800, marginBottom:6 }}>
+                  Ingen kommende kamper
+                </div>
+                <div style={{ fontSize:13, color:"var(--muted)" }}>
+                  Vi fant ingen kamper de neste {FOLLOW_LOOKAHEAD_DAYS} dagene for lagene du følger. Prøv å øke vinduet i follow2.js eller sjekk senere.
+                </div>
+              </div>
+            )}
+
+            {uniqueMatches.length > 0 && (
+              <div className="grid">
+                {uniqueMatches.map(({ team, eventNorm, isHome }) => (
+                  <MyTeamMatchCard
+                    key={String(eventNorm.eventId ?? "") + "-" + String(team.sofascoreId)}
+                    ev={eventNorm.raw}
+                    team={team}
+                    isHome={isHome}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
