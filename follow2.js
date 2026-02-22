@@ -5,7 +5,6 @@ const { useEffect, useMemo, useState } = React;
  * Vi gjenbruker samme base-URL som live2.js
  * (API_BASE er definert der i global scope).
  */
-
 const FOLLOW_LOOKAHEAD_DAYS = 30; // hvor langt frem vi ser etter neste kamp
 
 /* ===========================
@@ -22,31 +21,6 @@ function asNum(v){
 
 function getHomeId(ev) { return ev.home_team_id ?? ev.home_teams_id ?? null; }
 function getAwayId(ev) { return ev.away_team_id ?? ev.away_teams_id ?? null; }
-
-/* ===========================
-   Lagre fulgte lag i localStorage
-   =========================== */
-
-const LS_KEY = "volley_followed_teams_v1";
-
-function loadFollowedIds(){
-  try{
-    const raw = window.localStorage.getItem(LS_KEY);
-    if(!raw) return [];
-    const arr = JSON.parse(raw);
-    if(!Array.isArray(arr)) return [];
-    return arr.map(x => Number(x)).filter(n => Number.isFinite(n));
-  } catch(e){
-    return [];
-  }
-}
-
-function saveFollowedIds(ids){
-  try{
-    const arr = Array.from(new Set(ids.map(x => Number(x)).filter(n => Number.isFinite(n))));
-    window.localStorage.setItem(LS_KEY, JSON.stringify(arr));
-  } catch(e){}
-}
 
 /* ===========================
    Countdown-komponent
@@ -132,7 +106,7 @@ function normalizeEventForFollow(raw, sofaTeamIdByDbTeamId){
 }
 
 /* ===========================
-   Kampkort for "Mine lag"
+   Kampkort for "Alle lag"
    =========================== */
 
 function MyTeamMatchCard({ ev, team, isHome }){
@@ -261,7 +235,7 @@ function MyTeamMatchCard({ ev, team, isHome }){
 }
 
 /* ===========================
-   Hoved-app "Mine lag"
+   Hoved-app "Alle lag · neste kamp"
    =========================== */
 
 function FollowApp(){
@@ -269,9 +243,6 @@ function FollowApp(){
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-
-  const [followedIds, setFollowedIds] = useState(() => loadFollowedIds());
-  const [search, setSearch] = useState("");
 
   // Map: DB team.id (string) -> sofascore_team_id (number)
   const sofaTeamIdByDbTeamId = useMemo(() => {
@@ -353,55 +324,29 @@ function FollowApp(){
     return () => { cancelled = true; };
   }, []);
 
-  // Toggle follow for et team
-  function toggleFollow(sofaId){
-    setFollowedIds(prev => {
-      const id = Number(sofaId);
-      let next;
-      if (prev.includes(id)) {
-        next = prev.filter(x => x !== id);
-      } else {
-        next = [...prev, id];
-      }
-      saveFollowedIds(next);
-      return next;
-    });
-  }
-
-  // Filtrer teams for venstresiden (valg-liste)
-  const filteredTeams = useMemo(() => {
-    const q = asStr(search).toLowerCase();
-    const arr = [];
-    for (const [sofaId, t] of teamsBySofaId.entries()) {
-      if (!q || t.name.toLowerCase().includes(q) || (t.league || "").toLowerCase().includes(q)) {
-        arr.push({ ...t, sofascoreId: sofaId });
-      }
-    }
-    // sortér alfabetisk
-    arr.sort((a,b) => a.name.localeCompare(b.name, "nb"));
-    return arr;
-  }, [teamsBySofaId, search]);
-
   // Normaliser events (DB-id -> SofaScore-id)
   const normalizedEvents = useMemo(() => {
     return events.map(ev => normalizeEventForFollow(ev, sofaTeamIdByDbTeamId));
   }, [events, sofaTeamIdByDbTeamId]);
 
-  // Finn neste kamp for hvert fulgt lag (NØYAKTIG nærmest frem i tid)
+  // Finn NESTE kamp for hvert lag (nærmest fra dagens dato)
   const nextByTeam = useMemo(() => {
-    const nowSec = Math.floor(Date.now()/1000);
-    const map = new Map(); // sofaId -> {team, eventNorm, isHome}
+    const nowSec = Math.floor(Date.now() / 1000);
+    const map = new Map(); // sofaId -> { team, eventNorm, isHome, diff }
 
-    function consider(sofaId, evNorm, isHome){
-      const startTs = evNorm.startTs;
-      if (!startTs || startTs < nowSec) return;
+    function consider(sofaId, evNorm, isHome) {
+      const team = teamsBySofaId.get(sofaId);
+      if (!team) return;
+
+      const startTsNum = Number(evNorm.startTs || 0);
+      if (!Number.isFinite(startTsNum)) return;
+
+      const diff = startTsNum - nowSec;
+      if (diff < 0) return; // kun fremtid
 
       const current = map.get(sofaId);
-      if (!current || startTs < (current.eventNorm.startTs ?? Infinity)) {
-        const team = teamsBySofaId.get(sofaId);
-        if (team) {
-          map.set(sofaId, { team, eventNorm: evNorm, isHome });
-        }
+      if (!current || diff < current.diff) {
+        map.set(sofaId, { team, eventNorm: evNorm, isHome, diff });
       }
     }
 
@@ -409,29 +354,20 @@ function FollowApp(){
       const homeSofa = evNorm.homeSofaId;
       const awaySofa = evNorm.awaySofaId;
 
-      if (homeSofa && followedIds.includes(homeSofa)) {
-        consider(homeSofa, evNorm, true);
-      }
-      if (awaySofa && followedIds.includes(awaySofa)) {
-        consider(awaySofa, evNorm, false);
-      }
+      if (homeSofa) consider(homeSofa, evNorm, true);
+      if (awaySofa) consider(awaySofa, evNorm, false);
     }
 
-    // til array
     const out = [];
     for (const [sofaId, obj] of map.entries()) {
       out.push({ sofascoreId: sofaId, ...obj });
     }
-    // sorter på kampstart (nærmest først)
-    out.sort((a,b) => {
-      const ta = a.eventNorm.startTs ?? Infinity;
-      const tb = b.eventNorm.startTs ?? Infinity;
-      return ta - tb;
-    });
-    return out;
-  }, [normalizedEvents, followedIds, teamsBySofaId]);
 
-  const hasFollowed = followedIds.length > 0;
+    // sorter på diff (nærmest kamp først)
+    out.sort((a, b) => a.diff - b.diff);
+
+    return out;
+  }, [normalizedEvents, teamsBySofaId]);
 
   return (
     <div>
@@ -439,17 +375,8 @@ function FollowApp(){
         <div className="badges">
           <div className="badge">
             <span className="dot gray"></span>
-            Mine lag · neste kamp
+            Alle lag · neste kamp
           </div>
-        </div>
-        <div className="controls">
-          <input
-            type="text"
-            placeholder="Søk etter lag for å følge…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{ maxWidth:220 }}
-          />
         </div>
       </div>
 
@@ -466,98 +393,31 @@ function FollowApp(){
       )}
 
       {!loading && (
-        <div className="row" style={{ marginTop:10 }}>
-          {/* Venstre: velge lag */}
-          <div style={{ flex:"0 0 280px", maxWidth:280 }}>
+        <>
+          {nextByTeam.length === 0 && (
             <div className="card">
-              <div style={{ fontWeight:800, marginBottom:8, fontSize:14 }}>
-                Lag du følger
+              <div style={{ fontWeight:800, marginBottom:6 }}>
+                Ingen kommende kamper
               </div>
-              <div style={{ fontSize:12, color:"var(--muted)", marginBottom:8 }}>
-                Klikk på et lag for å følge/avfølge. Vi viser neste registrerte kamp for hvert lag du følger.
-              </div>
-
-              <div style={{
-                maxHeight: 380,
-                overflow:"auto",
-                borderTop:"1px solid var(--border)",
-                marginTop:8,
-                paddingTop:8
-              }}>
-                {filteredTeams.map(t => {
-                  const isOn = followedIds.includes(t.sofascoreId);
-                  return (
-                    <button
-                      key={t.sofascoreId}
-                      type="button"
-                      className="btn"
-                      style={{
-                        width:"100%",
-                        justifyContent:"space-between",
-                        marginBottom:6,
-                        background: isOn ? "#111827" : "#ffffff",
-                        color: isOn ? "#ffffff" : "#111827",
-                        borderColor: isOn ? "#111827" : "var(--border)"
-                      }}
-                      onClick={() => toggleFollow(t.sofascoreId)}
-                    >
-                      <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {t.name}
-                      </span>
-                      <span>
-                        {isOn ? "✓ Følges" : "Følg"}
-                      </span>
-                    </button>
-                  );
-                })}
-
-                {filteredTeams.length === 0 && (
-                  <div style={{ fontSize:12, color:"var(--muted)" }}>
-                    Ingen lag matcher søkeresultatet.
-                  </div>
-                )}
+              <div style={{ fontSize:13, color:"var(--muted)" }}>
+                Vi fant ingen kamper de neste {FOLLOW_LOOKAHEAD_DAYS} dagene for lagene i databasen.
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Høyre: neste kamp per lag */}
-          <div style={{ flex:"1 1 auto", minWidth:0 }}>
-            {!hasFollowed && (
-              <div className="card">
-                <div style={{ fontWeight:800, marginBottom:6 }}>
-                  Du følger ingen lag ennå
-                </div>
-                <div style={{ fontSize:13, color:"var(--muted)" }}>
-                  Bruk listen til venstre for å markere lag du vil følge. Da viser vi neste registrerte kamp for hvert lag, med nedtelling til kampstart.
-                </div>
-              </div>
-            )}
-
-            {hasFollowed && nextByTeam.length === 0 && (
-              <div className="card">
-                <div style={{ fontWeight:800, marginBottom:6 }}>
-                  Ingen kommende kamper
-                </div>
-                <div style={{ fontSize:13, color:"var(--muted)" }}>
-                  Vi fant ingen kamper de neste {FOLLOW_LOOKAHEAD_DAYS} dagene for lagene du følger. Prøv å øke vinduet i follow2.js eller sjekk senere.
-                </div>
-              </div>
-            )}
-
-            {nextByTeam.length > 0 && (
-              <div className="grid">
-                {nextByTeam.map(({ team, eventNorm, isHome }) => (
-                  <MyTeamMatchCard
-                    key={String(team.sofascoreId) + "-" + String(eventNorm.eventId ?? "")}
-                    ev={eventNorm.raw}
-                    team={team}
-                    isHome={isHome}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+          {nextByTeam.length > 0 && (
+            <div className="grid" style={{ marginTop:10 }}>
+              {nextByTeam.map(({ team, eventNorm, isHome }) => (
+                <MyTeamMatchCard
+                  key={String(team.sofascoreId) + "-" + String(eventNorm.eventId ?? "")}
+                  ev={eventNorm.raw}
+                  team={team}
+                  isHome={isHome}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
