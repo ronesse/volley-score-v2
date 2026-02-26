@@ -69,13 +69,14 @@ function currentPoints(ev) {
 }
 
 /* ===========================
-   Filter-knapper
+   Filter-knapper (meta-tekst)
    =========================== */
 
 const FILTERS = [
-  { key: "mizuno", label: "Mizuno Norge", empty: "Det er ingen pågående kamper for lag fra Norge nå." },
-  { key: "abroad", label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
-  { key: "other",  label: "Andre", empty: "Det er ingen andre livekamper for øyeblikket." },
+  { key: "followed", label: "Følger",        empty: "Du følger ingen livekamper." },
+  { key: "mizuno",   label: "Mizuno Norge",  empty: "Det er ingen pågående kamper for lag fra Norge nå." },
+  { key: "abroad",   label: "Norske spillere i utlandet", empty: "Det er ingen norske spillere i utlandet i aksjon nå." },
+  { key: "other",    label: "Andre",         empty: "Det er ingen andre livekamper for øyeblikket." },
 ];
 
 /* ===========================
@@ -699,9 +700,9 @@ function EventCard(props) {
     flashInfo,
     serveInfo,
     playLabelInfo,
-    isFocused,
-    onClick,
+    isFollowed,
     isAbroadGroup,
+    onToggleFollow,
     norPlayersHome = [],
     norPlayersAway = [],
     countryLabel,
@@ -731,7 +732,8 @@ function EventCard(props) {
     flashInfo && flashInfo.home ? "home" :
     (flashInfo && flashInfo.away ? "away" : null);
 
-  const cls = "card" + (isFocused ? " focused" : "");
+  // Bruk "focused"-klassens styling for fulgte kamper
+  const cls = "card" + (isFollowed ? " focused" : "");
 
   let playText = null;
   if (playLabelInfo) {
@@ -779,10 +781,11 @@ function EventCard(props) {
     );
   }
 
-  const showNorwegians = isFocused && isAbroadGroup;
+  // Norske spillere vises når kampen er fulgt og er i "abroad"-gruppa
+  const showNorwegians = isFollowed && isAbroadGroup;
 
   return (
-    <div className={cls} onClick={onClick} role="button">
+    <div className={cls}>
       <div className="cardHeader">
         <div>
           <div className="compTitle">
@@ -867,7 +870,7 @@ function EventCard(props) {
             {p.setNo ? (" · " + currentSetText) : ""}
           </div>
 
-          {isFocused && (isServingHome || isServingAway) && (
+          {isFollowed && (isServingHome || isServingAway) && (
             <div className="serveInfoRow">
               <div>
                 Serve · {isServingHome ? ev.home_team_name : ev.away_team_name}
@@ -916,7 +919,17 @@ function EventCard(props) {
         </div>
       </div>
 
-      {isFocused && setBoxes.length > 0 && (
+      <div className="followRow">
+        <button
+          type="button"
+          className={"followBtn" + (isFollowed ? " following" : "")}
+          onClick={onToggleFollow}
+        >
+          {isFollowed ? "Slutt å følge" : "Følg"}
+        </button>
+      </div>
+
+      {isFollowed && setBoxes.length > 0 && (
         <div
           className="setRow"
           style={{
@@ -934,6 +947,34 @@ function EventCard(props) {
 }
 
 /* ===========================
+   Drama-score (for Følger-siden)
+   =========================== */
+
+function dramaScore(ev) {
+  const p = currentPoints(ev);
+  const setNo = p.setNo || 0;
+  const setsTotal = (ev.home_sets || 0) + (ev.away_sets || 0);
+  const setDiff = Math.abs((ev.home_sets || 0) - (ev.away_sets || 0));
+  const pointDiff = Math.abs((p.home ?? 0) - (p.away ?? 0));
+
+  let score = 0;
+
+  // 5. sett = mest dramatisk
+  if (setNo === 5) score += 100;
+  // 2–2 i sett
+  if (ev.home_sets === 2 && ev.away_sets === 2) score += 80;
+  // jevnt i sett totalt
+  if (setDiff === 0 && setsTotal > 0) score += 40;
+  // små marginer i poeng
+  if (pointDiff <= 2 && p.home != null && p.away != null) score += 20;
+
+  // flere spilte sett gir litt ekstra
+  score += setsTotal * 5;
+
+  return score;
+}
+
+/* ===========================
    App
    =========================== */
 
@@ -942,10 +983,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [filter, setFilter] = useState("other");
+  // Start fortsatt på Mizuno (matcher eksisterende HTML-fane)
+  const [filter, setFilter] = useState("mizuno");
   const [flash, setFlash] = useState({});
   const [playLabel, setPlayLabel] = useState({});
-  const [focusedId, setFocusedId] = useState(null);
+  const [followedIds, setFollowedIds] = useState([]);   // flere fulgte kamper
 
   const [teams, setTeams] = useState([]);
   const [players, setPlayers] = useState([]);
@@ -963,6 +1005,15 @@ function App() {
     if (!res.ok) throw new Error(String(res.status) + " " + String(res.statusText));
     return res.json();
   }, []);
+
+  /* ---- Oppdater Følger (X) i fanen hvis HTML har #followCount ---- */
+
+  useEffect(() => {
+    const el = document.getElementById("followCount");
+    if (el) {
+      el.textContent = `(${followedIds.length})`;
+    }
+  }, [followedIds]);
 
   /* ---- Hent teams ---- */
 
@@ -1175,73 +1226,56 @@ function App() {
     return events.filter(ev => isLiveStatus(ev.status_type));
   }, [events]);
 
-  /* ---- tell opp per gruppe ---- */
-
-  const counts = useMemo(() => {
-    let miz = 0, abr = 0, oth = 0;
-    for (let i = 0; i < liveEvents.length; i++) {
-      const ev = liveEvents[i];
-      const group = classifyEventGroup(ev, teamsBySofaId);
-      if (group === "mizuno") miz++;
-      else if (group === "abroad") abr++;
-      else oth++;
-    }
-    return { abroad: abr, mizuno: miz, other: oth, all: liveEvents.length };
-  }, [liveEvents, teamsBySofaId]);
-
-  /* ---- smart default-filter ---- */
+  /* ---- Lytt til filter-event fra index2.html ---- */
 
   useEffect(() => {
-    if (counts.mizuno > 0) {
-      setFilter("mizuno");
-    } else if (counts.abroad > 0) {
-      setFilter("abroad");
-    } else {
-      setFilter("other");
+    function handleFilterEvent(e) {
+      const key = e.detail;
+      if (FILTERS.some(f => f.key === key)) {
+        setFilter(key);
+      }
     }
-  }, [counts.abroad, counts.mizuno, counts.other]);
+    window.addEventListener("volley-filter", handleFilterEvent);
+    return () => window.removeEventListener("volley-filter", handleFilterEvent);
+  }, []);
 
-  /* ---- filtrerte events ---- */
+  /* ---- filtrerte events (inkl. ny Følger-fane) ---- */
 
   const filtered = useMemo(() => {
     const arr = liveEvents.slice();
     arr.sort((a, b) => (a.start_ts ?? 0) - (b.start_ts ?? 0));
-    return arr.filter(ev => classifyEventGroup(ev, teamsBySofaId) === filter);
-  }, [liveEvents, filter, teamsBySofaId]);
 
-  /* ---- fokuslogikk ---- */
-
-  const visible = useMemo(() => {
-    if (!focusedId) return filtered;
-
-    const found =
-      filtered.find(ev => eventId(ev) === focusedId) ||
-      liveEvents.find(ev => eventId(ev) === focusedId) ||
-      null;
-
-    return found ? [found] : filtered;
-  }, [filtered, focusedId, liveEvents]);
-
-  const currentFilterObj = FILTERS.find(x => x.key === filter);
-
-  /* ---- Wake Lock vs fokus ---- */
-
-  useEffect(() => {
-    let focusedEvent = null;
-    if (focusedId != null) {
-      focusedEvent =
-        filtered.find(ev => eventId(ev) === focusedId) ||
-        liveEvents.find(ev => eventId(ev) === focusedId) ||
-        null;
+    if (filter === "followed") {
+      const followed = arr.filter(ev => {
+        const id = eventId(ev);
+        return id != null && followedIds.includes(id);
+      });
+      // mest dramatisk øverst
+      followed.sort((a, b) => dramaScore(b) - dramaScore(a));
+      return followed;
     }
 
-    const cp = focusedEvent ? currentPoints(focusedEvent) : null;
-    const hasActiveSet = !!(cp && cp.setNo != null);
+    // øvrige faner oppfører seg som før
+    return arr.filter(ev => classifyEventGroup(ev, teamsBySofaId) === filter);
+  }, [liveEvents, filter, teamsBySofaId, followedIds]);
 
-    const shouldKeepAwake =
-      !!focusedEvent &&
-      isLiveStatus(focusedEvent.status_type) &&
-      hasActiveSet;
+  const currentFilterObj = useMemo(
+    () => FILTERS.find(x => x.key === filter),
+    [filter]
+  );
+
+  /* ---- Wake Lock basert på fulgte kamper ---- */
+
+  useEffect(() => {
+    // Finn alle fulgte kamper som fortsatt er live og der et sett faktisk pågår
+    const followedLiveWithSet = liveEvents.filter(ev => {
+      const id = eventId(ev);
+      if (id == null || !followedIds.includes(id)) return false;
+      const cp = currentPoints(ev);
+      return cp && cp.setNo != null && isLiveStatus(ev.status_type);
+    });
+
+    const shouldKeepAwake = followedLiveWithSet.length > 0;
 
     if (shouldKeepAwake) {
       requestWakeLock();
@@ -1259,7 +1293,20 @@ function App() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [focusedId, filtered, liveEvents, requestWakeLock, releaseWakeLock]);
+  }, [followedIds, liveEvents, requestWakeLock, releaseWakeLock]);
+
+  /* ---- Rydd opp i fulgte kamper når de ikke er live lenger ---- */
+
+  useEffect(() => {
+    if (followedIds.length === 0) return;
+
+    setFollowedIds(prev =>
+      prev.filter(id => {
+        const ev = events.find(e => eventId(e) === id);
+        return ev && isLiveStatus(ev.status_type);
+      })
+    );
+  }, [events, followedIds.length]);
 
   /* ---- Hjelper: norske spillere for lag ---- */
 
@@ -1270,55 +1317,42 @@ function App() {
     return playersByTeamSofaId.get(key) || [];
   }
 
+  /* ---- Toggle follow ---- */
+
+  function toggleFollow(ev) {
+    const id = eventId(ev);
+    if (id == null) return;
+    setFollowedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  }
+
   /* ---- Render ---- */
 
   return (
     <div className="wrap">
-      <div className="focusBar">
-        <div className="badges" style={{ marginBottom: 4 }}>
-          {FILTERS.map(f => {
-            const active = filter === f.key;
-            const n =
-              f.key === "abroad" ? counts.abroad :
-              f.key === "mizuno" ? counts.mizuno :
-              counts.other;
-
-            return (
-              <button
-                key={f.key}
-                onClick={() => { setFilter(f.key); setFocusedId(null); }}
-                className="badge filterBtn"
-                style={{
-                  background: active ? "#111827" : "#fafafa",
-                  color: active ? "#ffffff" : "#111827",
-                  borderColor: active ? "#111827" : "var(--border)",
-                }}
-                title={f.label}
-              >
-                {f.label} ({n})
-              </button>
-            );
-          })}
-        </div>
-
-        {focusedId && (
-          <button className="backBtn" onClick={() => setFocusedId(null)}>
-            ← Tilbake til alle kamper
-          </button>
-        )}
-      </div>
-
-      {focusedId && (
+      {followedIds.length > 0 && (
         <div className="focusInfo">
-          Viser én kamp i fokus. Skjermen holdes våken bare mens et sett faktisk pågår
-          (der det støttes av nettleseren).
+          Du følger {followedIds.length} kamp{followedIds.length === 1 ? "" : "er"}.
+          Skjermen holdes våken så lenge minst én av dem pågår (der det støttes av nettleseren).
+        </div>
+      )}
+
+      {filter === "followed" && followedIds.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            className="followBtn"
+            onClick={() => setFollowedIds([])}
+          >
+            Avfølg alle
+          </button>
         </div>
       )}
 
       {error && <div className="alert">Feil: {error}</div>}
       {loading && <div style={{ marginTop: 10, color: "#6b7280" }}>Laster…</div>}
 
-      {!loading && !error && visible.length === 0 && (
+      {!loading && !error && filtered.length === 0 && (
         <div className="card" style={{ marginTop: 10, cursor: "default" }}>
           <div style={{ fontWeight: 800, marginBottom: 6 }}>Ingen livekamper</div>
           <div style={{ color: "#6b7280" }}>
@@ -1328,13 +1362,13 @@ function App() {
       )}
 
       <div className="grid">
-        {visible.map(ev => {
+        {filtered.map(ev => {
           const keyStr = eventKey(ev);
           const flashInfo = flash[keyStr] || {};
           const playLabelInfo = playLabel[keyStr] || null;
-          const isFocused = focusedId != null && eventId(ev) === focusedId;
 
           const id = eventId(ev);
+          const isFollowed = id != null && followedIds.includes(id);
 
           const group = classifyEventGroup(ev, teamsBySofaId);
           const isAbroadGroup = group === "abroad";
@@ -1363,20 +1397,14 @@ function App() {
               flashInfo={flashInfo}
               serveInfo={serveInfo}
               playLabelInfo={playLabelInfo}
-              isFocused={isFocused}
+              isFollowed={isFollowed}
               isAbroadGroup={isAbroadGroup}
               norPlayersHome={norPlayersHome}
               norPlayersAway={norPlayersAway}
               countryLabel={countryLabel}
               leagueLevel={leagueLevel}
               stageLabel={stageLabel}
-              onClick={() => {
-                if (id == null) {
-                  setFocusedId(null);
-                } else {
-                  setFocusedId(prev => (prev === id ? null : id));
-                }
-              }}
+              onToggleFollow={() => toggleFollow(ev)}
             />
           );
         })}
