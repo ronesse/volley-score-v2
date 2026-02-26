@@ -537,36 +537,10 @@
       font-size:14px;
     }
 
-    .focusBar{
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      margin-top:8px;
-      margin-bottom:4px;
-      gap:10px;
-      flex-wrap:wrap;
-    }
-
     .focusInfo{
       font-size:13px;
       color:var(--muted);
-    }
-
-    .backBtn{
-      border-radius:999px;
-      border:1px solid var(--border);
-      background:#111827;
-      color:#ffffff;
-      padding:6px 12px;
-      font-size:12px;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      gap:6px;
-    }
-
-    .backBtn:hover{
-      background:#020617;
+      margin-top:4px;
     }
 
     .filterBtn{
@@ -716,6 +690,28 @@
       font-size: 12px;
     }
 
+    /* Følg-knapp */
+    .followRow{
+      margin-top:10px;
+      display:flex;
+      justify-content:flex-end;
+    }
+
+    .followBtn{
+      border-radius:999px;
+      border:1px solid var(--border);
+      padding:6px 12px;
+      font-size:12px;
+      background:#111827;
+      color:#ffffff;
+      cursor:pointer;
+    }
+
+    .followBtn.following{
+      background:#ffffff;
+      color:#111827;
+    }
+
   </style>
 </head>
 
@@ -724,18 +720,19 @@
     <div class="header">
       <div>
         <h1>🏐 Volleyball</h1>
-<div class="tabs">
-  <button class="tabBtn active" data-tab="live">Livescore</button>
-  <button class="tabBtn" data-tab="hub">Volley Hub</button>
-  <button class="tabBtn" data-tab="follow">Mine lag</button>
-</div>
+        <div class="tabs">
+         <button class="tabBtn active" data-filter="followed">
+          Følger <span id="followCount">(0)</span>
+        </button>
+          <button class="tabBtn" data-filter="mizuno">Mizuno</button>
+          <button class="tabBtn" data-filter="abroad">Norske spillere i utlandet</button>
+          <button class="tabBtn" data-filter="other">Andre</button>
+        </div>
       </div>
       <button id="themeBtn" class="tabBtn">🌙 Mørk</button>
     </div>
 
-<div id="live-root" class="view active"></div>
-<div id="hub-root" class="view"></div>
-<div id="follow-root" class="view"></div>
+    <div id="live-root"></div>
   </div>
 
   <script>
@@ -744,26 +741,29 @@
       const body = document.body;
       const btn  = document.getElementById("themeBtn");
 
+      // Tema-knapp
       btn.onclick = () => {
         theme = theme === "light" ? "dark" : "light";
         body.setAttribute("data-theme", theme);
         btn.textContent = theme === "light" ? "🌙 Mørk" : "🌞 Lys";
       };
 
-      document.querySelectorAll(".tabBtn[data-tab]").forEach(b => {
+      // Faner som styrer filteret i React via custom event
+      document.querySelectorAll(".tabBtn[data-filter]").forEach(b => {
         b.onclick = () => {
-          document.querySelectorAll(".tabBtn[data-tab]").forEach(x => x.classList.remove("active"));
+          document.querySelectorAll(".tabBtn[data-filter]").forEach(x => x.classList.remove("active"));
           b.classList.add("active");
-          document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-          document.getElementById(b.dataset.tab + "-root").classList.add("active");
+
+          const filter = b.dataset.filter;
+          window.dispatchEvent(new CustomEvent("volley-filter", { detail: filter }));
         };
       });
     })();
   </script>
 
-  <!-- Appene -->
+  <!-- App -->
   <script type="text/babel" src="live2.js"></script>
   <script type="text/babel" src="hub2.js"></script>
-    <script type="text/babel" src="follow2.js"></script>
+  <script type="text/babel" src="follow2.js"></script>
 </body>
 </html>
