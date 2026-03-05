@@ -66,6 +66,7 @@
       padding: 12px 14px 22px;
     }
 
+    /* Tabs */
     .tabs{
       display:flex;
       gap: 8px;
@@ -89,6 +90,7 @@
       border-color: rgba(255,255,255,.65);
     }
 
+    /* Grid */
     .grid{
       display:grid;
       gap: 12px;
@@ -100,6 +102,7 @@
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     }
 
+    /* Card */
     .card{
       background: var(--card);
       border: 1px solid rgba(15,23,42,.08);
@@ -136,6 +139,7 @@
       text-align:center;
     }
 
+    /* Logo */
     .logoWrap{
       width: 58px;
       height: 58px;
@@ -164,6 +168,7 @@
       background: #f8fafc;
     }
 
+    /* Buttons */
     .btn{
       appearance:none;
       border: 1px solid rgba(15,23,42,.12);
@@ -335,6 +340,7 @@
       min-width: 150px;
     }
 
+    /* Fixed alignment of digits around dash */
     .scoreLine{
       display:inline-flex;
       align-items:center;
@@ -401,6 +407,7 @@
       gap: 10px;
     }
 
+    /* Drag UI */
     .dragHint{
       display:inline-flex;
       align-items:center;
@@ -420,6 +427,7 @@
       display:block;
     }
 
+    /* Hold-to-drag handle */
     .dragHandle{
       cursor: grab;
       touch-action: none;
@@ -435,6 +443,7 @@
       box-shadow: 0 18px 40px rgba(2,6,23,.12);
     }
 
+    /* Placeholder / ghost */
     .dropPlaceholder{
       border: 2px dashed rgba(37,99,235,.45);
       border-radius: var(--radius);
@@ -473,6 +482,7 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* Momentum icons + tag styling */
     .scoreIcons{
       display:inline-flex;
       align-items:center;
@@ -508,6 +518,39 @@
     }
     @media (max-width: 380px){
       .grid.compact{ grid-template-columns: 1fr 1fr; }
+    }
+
+    /* =========================
+       Mobile adaptive density (Selected)
+       ========================= */
+    @media (max-width:520px){
+
+      /* 3-4 matches */
+      .grid.mobileDense.detailed{
+        grid-template-columns: 1fr 1fr;
+        gap:10px;
+      }
+      .grid.mobileDense .card{ border-radius:14px; }
+      .grid.mobileDense .cardTop{ padding:10px 10px 6px; }
+      .grid.mobileDense .logoWrap{ width:46px; height:46px; }
+      .grid.mobileDense .bigScore.detailSize{ font-size:24px; }
+      .grid.mobileDense .teamVName{ font-size:11px; }
+      .grid.mobileDense .metaLine{ font-size:10px; }
+      .grid.mobileDense .setsRow{ display:none; }
+      .grid.mobileDense .actions{ padding:0 10px 8px; }
+
+      /* 5+ matches (ultra compact) */
+      .grid.mobileVeryDense.detailed{
+        grid-template-columns: 1fr 1fr;
+        gap:8px;
+      }
+      .grid.mobileVeryDense .logoWrap{ width:38px; height:38px; }
+      .grid.mobileVeryDense .bigScore.detailSize{ font-size:20px; }
+      .grid.mobileVeryDense .teamVName{ font-size:10px; }
+      .grid.mobileVeryDense .serveLine{ display:none; }
+      .grid.mobileVeryDense .metaLine{ display:none; }
+      .grid.mobileVeryDense .actions{ display:none; }
+      .grid.mobileVeryDense .setsRow{ display:none; }
     }
   </style>
 </head>
@@ -578,7 +621,7 @@
       saveMomentumCache();
     }
 
-    // Insert fromId before toId in the *full* followedOrder list
+    // Insert fromId before toId in full followedOrder
     function moveFollowed(fromId, toId){
       fromId = String(fromId); toId = String(toId);
       if (fromId === toId) return;
@@ -593,26 +636,20 @@
       saveFollowedOrder();
     }
 
-    // Move fromId to end of the current LIVE selected order (without disturbing non-live selections too much)
     function moveFollowedToEndOfLive(fromId, liveSelectedIds){
       fromId = String(fromId);
       if (!liveSelectedIds.length) return;
 
-      // remove from wherever it is
       const fromIdx = followedOrder.indexOf(fromId);
       if (fromIdx < 0) return;
       const [item] = followedOrder.splice(fromIdx, 1);
 
-      // compute last live id (after removal we find its index)
       const lastLiveId = liveSelectedIds[liveSelectedIds.length - 1];
       const lastIdx = followedOrder.indexOf(lastLiveId);
 
-      if (lastIdx < 0) {
-        // fallback: push end
-        followedOrder.push(item);
-      } else {
-        followedOrder.splice(lastIdx + 1, 0, item);
-      }
+      if (lastIdx < 0) followedOrder.push(item);
+      else followedOrder.splice(lastIdx + 1, 0, item);
+
       saveFollowedOrder();
     }
 
@@ -634,7 +671,6 @@
         return new Map();
       }
     }
-
     function saveMomentumCache(){
       const MAX = 200;
       const entries = Array.from(lastMomentumByEvent.entries()).slice(-MAX);
@@ -676,7 +712,6 @@
       if (icon === "party") return "🎉";
       return "";
     }
-
     function computeMomentumFromMatch(match){
       const homeRun = Number(match.home_point_run || 0);
       const awayRun = Number(match.away_point_run || 0);
@@ -714,7 +749,6 @@
 
       return cfg;
     }
-
     function getMomentum(match){
       const id = String(match.event_id);
 
@@ -802,6 +836,19 @@
       else releaseWakeLock();
     }
     document.addEventListener("visibilitychange", ensureWakeLock);
+
+    // ---------- Mobile density ----------
+    function applyMobileDensity(count){
+      const grid = document.getElementById("grid");
+      grid.classList.remove("mobileDense","mobileVeryDense");
+
+      const isMobile = window.innerWidth < 520;
+      if(!isMobile) return;
+
+      if(count >= 3) grid.classList.add("mobileDense");
+      if(count >= 5) grid.classList.add("mobileVeryDense");
+    }
+    window.addEventListener("resize", () => render());
 
     // ---------- Rendering ----------
     function renderSetPills(match, currentSet) {
@@ -932,9 +979,7 @@
 
     let placeholderEl = null;
     let placeholderHeight = 0;
-
-    // ✅ This is the key: we track intended drop position explicitly
-    let dropBeforeId = null;  // event_id to insert BEFORE; null => end of live list
+    let dropBeforeId = null;
 
     function clearPlaceholder(){
       if (placeholderEl && placeholderEl.parentElement){
@@ -942,7 +987,6 @@
       }
       placeholderEl = null;
     }
-
     function ensurePlaceholder(){
       if (placeholderEl) return;
       placeholderEl = document.createElement("div");
@@ -950,18 +994,14 @@
       placeholderEl.style.height = `${placeholderHeight}px`;
       document.getElementById("grid").appendChild(placeholderEl);
     }
-
     function placePlaceholderBefore(card){
       ensurePlaceholder();
-      const parent = document.getElementById("grid");
-      parent.insertBefore(placeholderEl, card);
+      document.getElementById("grid").insertBefore(placeholderEl, card);
     }
-
     function placePlaceholderAtEnd(){
       ensurePlaceholder();
       document.getElementById("grid").appendChild(placeholderEl);
     }
-
     function cleanupDragUI(sourceCard){
       if (sourceCard) sourceCard.classList.remove("dragging");
       dragActive = false;
@@ -971,7 +1011,6 @@
     }
 
     function getLiveSelectedIdsInOrder(){
-      // inprogress + in followedOrder order
       const inprogress = liveMatches.filter(m => m.status_type === "inprogress");
       const matchById = new Map(inprogress.map(m => [String(m.event_id), m]));
       return followedOrder.map(id => String(id)).filter(id => matchById.has(id));
@@ -993,7 +1032,6 @@
         const rect = cardEl.getBoundingClientRect();
         placeholderHeight = Math.max(90, Math.round(rect.height));
 
-        // Long-press lock (150ms)
         pressTimer = setTimeout(() => {
           dragActive = true;
           draggingId = eventId;
@@ -1004,7 +1042,6 @@
           cardEl.classList.add("dragging");
           handle.setPointerCapture?.(e.pointerId);
 
-          // initial placeholder right after card
           ensurePlaceholder();
           if (cardEl.nextSibling) cardEl.parentElement.insertBefore(placeholderEl, cardEl.nextSibling);
           else cardEl.parentElement.appendChild(placeholderEl);
@@ -1012,7 +1049,6 @@
       });
 
       handle.addEventListener("pointermove", (e) => {
-        // If we are not dragging yet, cancel long-press if the finger moved (avoid accidental drags)
         if (!dragActive) {
           if (pressTimer) {
             const dx = Math.abs(e.clientX - startX);
@@ -1025,33 +1061,25 @@
           return;
         }
 
-        // Auto-scroll near top/bottom
         const margin = 90;
         const speed = 14;
         if (e.clientY < margin) window.scrollBy(0, -speed);
         else if (e.clientY > window.innerHeight - margin) window.scrollBy(0, speed);
 
-        // Determine which card we are "over"
         const over = document.elementFromPoint(e.clientX, e.clientY);
         const overCard = over?.closest?.(".card[data-eid]");
 
         if (overCard && overCard.dataset.eid && overCard.dataset.eid !== draggingId) {
           placePlaceholderBefore(overCard);
-          dropBeforeId = overCard.dataset.eid; // ✅ THIS is what we will use on drop
+          dropBeforeId = overCard.dataset.eid;
         } else {
-          // if not over a card, treat as end
           placePlaceholderAtEnd();
           dropBeforeId = null;
         }
       });
 
-      handle.addEventListener("pointerup", (e) => {
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-
-        // If drag never started, it was just a tap
+      handle.addEventListener("pointerup", () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
         if (!dragActive) return;
 
         const fromId = draggingId;
@@ -1060,9 +1088,8 @@
         if (dropBeforeId && dropBeforeId !== fromId) {
           moveFollowed(fromId, dropBeforeId);
         } else {
-          // drop at end of live selected
           const newLive = liveIds.concat([fromId]);
-          moveFollowedToEndOfLive(fromId, newLive); // uses last id of live list
+          moveFollowedToEndOfLive(fromId, newLive);
         }
 
         render();
@@ -1070,10 +1097,7 @@
       });
 
       handle.addEventListener("pointercancel", () => {
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
         cleanupDragUI(cardEl);
       });
     }
@@ -1272,6 +1296,7 @@
       if (currentTab === "all"){
         grid.classList.add("compact");
         grid.classList.remove("detailed");
+        grid.classList.remove("mobileDense","mobileVeryDense");
 
         if (inprogress.length === 0){
           empty.style.display = "block";
@@ -1290,6 +1315,8 @@
 
         const matchById = new Map(inprogress.map(m => [String(m.event_id), m]));
         const orderedLiveSelected = followedOrder.map(id => matchById.get(String(id))).filter(Boolean);
+
+        applyMobileDensity(orderedLiveSelected.length);
 
         if (orderedLiveSelected.length === 0){
           empty.style.display = "block";
